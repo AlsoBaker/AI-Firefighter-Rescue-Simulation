@@ -39,7 +39,4 @@ def create_environment():
         if grid[r, c] == EMPTY:
             grid[r, c] = FIRE
 
-    # ---------------- Firefighter ----------------
-    grid[0, 0] = FIREFIGHTER
-
     return grid
