@@ -3,40 +3,65 @@
 import numpy as np
 from config import *
 
-def create_environment():
 
-    grid = np.zeros((ROWS, COLS))
+def _place_staircases(grid):
+    """Stamp fixed-edge staircases onto any floor grid."""
+    for r in (STAIR_ROW_START, STAIR_ROW_END):
+        grid[r, STAIR_UP_COL]   = STAIRCASE
+        grid[r, STAIR_DOWN_COL] = STAIRCASE
+    return grid
 
-    # ---------------- Obstacles ----------------
-    for _ in range(45):
-        r = np.random.randint(ROWS)
-        c = np.random.randint(COLS)
 
+def create_floor(floor_num):
+    """
+    Generate one floor grid.
+    Floor 0 = most fire / most people (ground floor, most danger)
+    Floor 1 = medium
+    Floor 2 = least fire / fewest people (top floor, easiest to reach)
+    """
+    grid = np.zeros((ROWS, COLS), dtype=float)
+
+    # Obstacles — fewer on higher floors
+    n_obstacles = max(20, 40 - floor_num * 8)
+    for _ in range(n_obstacles):
+        r = np.random.randint(1, ROWS - 1)
+        c = np.random.randint(1, COLS - 1)
         if grid[r, c] == EMPTY:
             grid[r, c] = OBSTACLE
 
-    # ---------------- People ----------------
-    for _ in range(10):
+    # People — more on lower floors (harder to reach first)
+    n_people = [10, 8, 6][floor_num]
+    for _ in range(n_people):
         r = np.random.randint(ROWS)
         c = np.random.randint(COLS)
-
         if grid[r, c] == EMPTY:
             grid[r, c] = PERSON
 
-    # ---------------- Shelters ----------------
-    for _ in range(3):
+    # Hospital (2 per floor — replaces SHELTER)
+    for _ in range(2):
         r = np.random.randint(ROWS)
         c = np.random.randint(COLS)
-
         if grid[r, c] == EMPTY:
-            grid[r, c] = SHELTER
+            grid[r, c] = HOSPITAL
 
-    # ---------------- Multiple Fire Sources ----------------
-    for _ in range(4):
+    # Fire — maximum on floor 0, minimum on floor 2
+    n_fire = [5, 1, 1][floor_num]
+    for _ in range(n_fire):
         r = np.random.randint(ROWS)
         c = np.random.randint(COLS)
-
         if grid[r, c] == EMPTY:
             grid[r, c] = FIRE
 
+    # Staircases always placed last so they override anything
+    grid = _place_staircases(grid)
+
     return grid
+
+
+def create_all_floors():
+    return [create_floor(i) for i in range(NUM_FLOORS)]
+
+
+# ---------- backward compat ----------
+def create_environment():
+    return create_floor(0)

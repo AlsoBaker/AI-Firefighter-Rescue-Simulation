@@ -1,0 +1,56 @@
+[
+  {
+    "score": 1612.3,
+    "rescued": 21,
+    "total": 23,
+    "steps": 136,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 14:59"
+  },
+  {
+    "score": 1596.6,
+    "rescued": 20,
+    "total": 23,
+    "steps": 118,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 14:56"
+  },
+  {
+    "score": 1564.3,
+    "rescued": 20,
+    "total": 22,
+    "steps": 152,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 14:51"
+  },
+  {
+    "score": 1554.6,
+    "rescued": 18,
+    "total": 21,
+    "steps": 131,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 14:56"
+  },
+  {
+    "score": 1479.5,
+    "rescued": 17,
+    "total": 20,
+    "steps": 145,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 15:00"
+  },
+  {
+    "score": 1454.1,
+    "rescued": 18,
+    "total": 23,
+    "steps": 141,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-03-20 14:56"
+  }
+]
