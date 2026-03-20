@@ -11,6 +11,7 @@ from health import HealthSystem
 from floors import FloorManager
 from metrics import SimulationMetrics
 from leaderboard import save_score, get_top_scores
+from ambulance import AmbulancePhase
 
 pygame.init()
 
@@ -176,6 +177,7 @@ class PygameSimulation:
                 elif k == pygame.K_UP:      self.speed = min(3.0, self.speed + 0.5)
                 elif k == pygame.K_DOWN:    self.speed = max(0.5, self.speed - 0.5)
                 elif k == pygame.K_r:       return 'reset'
+                elif k == pygame.K_a and self.show_end_screen: return 'ambulance'
                 elif k == pygame.K_1:       self.active_floor = 0
                 elif k == pygame.K_2 and NUM_FLOORS > 1: self.active_floor = 1
                 elif k == pygame.K_3 and NUM_FLOORS > 2: self.active_floor = 2
@@ -580,7 +582,7 @@ class PygameSimulation:
 
         # ── Footer ─────────────────────────────────────────────────────
         pygame.draw.line(self.screen, (45,45,45), (0, bot_y+4), (SCREEN_W, bot_y+4), 1)
-        self._draw_text("R   restart          ESC   quit",
+        self._draw_text("R   restart          A   ambulance phase          ESC   quit",
                         F_MEDIUM, C_TEXT_DIM, SCREEN_W//2, bot_y+16, center=True)
 
     # ----------------------------------------------------------
@@ -608,6 +610,8 @@ class PygameSimulation:
             result = self.handle_events()
             if result == 'reset':
                 return 'reset'
+            if result == 'ambulance':
+                return ('ambulance', self.metrics.people_rescued)
             if not result:
                 break
             self.update()
@@ -629,6 +633,10 @@ def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar"):
                                   algorithm)
         result = sim.run()
         if result == 'reset':
+            grids = create_all_floors()
+        elif isinstance(result, tuple) and result[0] == 'ambulance':
+            rescued = result[1]
+            AmbulancePhase(rescued_count=rescued).run()
             grids = create_all_floors()
         else:
             return result
