@@ -7,7 +7,7 @@ from config import *
 _FIRE_IMMUNE = {OBSTACLE, FIREFIGHTER, STAIRCASE, HOSPITAL}
 
 # Spread probability per floor — floor 0 burns fast, upper floors burn slower
-_SPREAD_PROB = [0.20, 0.16, 0.12]
+_SPREAD_PROB = [0.24, 0.20, 0.16]
 
 
 def spread_fire(grid, step, floor_idx=0):

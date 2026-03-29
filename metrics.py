@@ -22,7 +22,6 @@ class SimulationMetrics:
         self.rescue_history      = []
         self.ff_hp_history       = []   # avg FF HP over time
 
-        self.per_floor_rescued   = {i: 0 for i in range(NUM_FLOORS)}
         self.initial_people_count = 0
         self._prev_total_alive   = 0    # for burned tracking
         self.current_phase       = 'outbreak'
@@ -37,7 +36,8 @@ class SimulationMetrics:
         self.max_fire_spread = max(self.max_fire_spread, total_fire)
 
         if firefighter_stats:
-            self.people_rescued = firefighter_stats.get('rescued', 0)
+            self.people_rescued     = firefighter_stats.get('rescued', 0)
+            self.fires_extinguished = firefighter_stats.get('extinguished', 0)
             avg_hp = firefighter_stats.get('avg_hp', FF_MAX_HP)
             self.ff_hp_history.append(avg_hp)
 
@@ -64,7 +64,7 @@ class SimulationMetrics:
     def _detect_phase(self, fire_cells, people_danger):
         if self.steps < 20:
             self.current_phase = 'outbreak'
-        elif people_danger > 2 or fire_cells > 20:
+        elif people_danger > 2 or fire_cells > 20 * NUM_FLOORS:
             self.current_phase = 'critical'
         else:
             self.current_phase = 'recovery'
@@ -103,7 +103,6 @@ class SimulationMetrics:
             'final_score':       self.calculate_score(total_people),
             'firefighter_stats': firefighter_stats,
             'phase':             self.current_phase,
-            'per_floor_rescued': self.per_floor_rescued,
         }
 
     def print_report(self, total_people, firefighter_stats):

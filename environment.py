@@ -19,7 +19,7 @@ def create_floor(floor_num):
     Floor 1 = medium
     Floor 2 = least fire / fewest people (top floor, easiest to reach)
     """
-    grid = np.zeros((ROWS, COLS), dtype=float)
+    grid = np.zeros((ROWS, COLS), dtype=int)
 
     # Obstacles — fewer on higher floors
     n_obstacles = max(20, 40 - floor_num * 8)
@@ -30,16 +30,19 @@ def create_floor(floor_num):
             grid[r, c] = OBSTACLE
 
     # People — more on lower floors (harder to reach first)
+    # Exclude staircase rows so people are never silently overwritten
+    safe_rows = [r for r in range(ROWS)
+                 if r not in (STAIR_ROW_START, STAIR_ROW_END)]
     n_people = [10, 8, 6][floor_num]
     for _ in range(n_people):
-        r = np.random.randint(ROWS)
+        r = safe_rows[np.random.randint(len(safe_rows))]
         c = np.random.randint(COLS)
         if grid[r, c] == EMPTY:
             grid[r, c] = PERSON
 
     # Hospital (2 per floor — replaces SHELTER)
     for _ in range(2):
-        r = np.random.randint(ROWS)
+        r = safe_rows[np.random.randint(len(safe_rows))]
         c = np.random.randint(COLS)
         if grid[r, c] == EMPTY:
             grid[r, c] = HOSPITAL

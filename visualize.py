@@ -159,7 +159,7 @@ class PygameSimulation:
         self.img_civilian  = _load("civilian.png",    (cs, cs))
         self.img_danger    = _tinted(self.img_civilian, (255, 80, 0, 120))
         self.img_ff        = _load("firefighter.png", (cs, cs))
-        self.img_hospital  = _load("hospital.png",    (cs, cs))
+        self.img_hospital  = _load("shelter.png",     (cs, cs))
         self.img_staircase = _load("exit.png",        (cs, cs))
 
     # ----------------------------------------------------------
@@ -218,7 +218,7 @@ class PygameSimulation:
             for floor_idx, r, c in dead:
                 self.grids[floor_idx][r, c] = EMPTY
                 self.health.remove(floor_idx, r, c)
-                self.metrics.people_burned += 1
+                # people_burned is tracked in metrics.update() via _prev_total_alive
 
             if self.ff_manager:
                 self.health.tick_ff_damage(self.ff_manager.firefighters, self.grids)
@@ -249,9 +249,14 @@ class PygameSimulation:
     def _finish(self):
         """Save score and prep leaderboard data."""
         ff_stats = get_firefighter_stats()
+        # Civilians being carried at sim end are counted as rescued —
+        # the firefighter already saved them, just never reached the hospital.
+        carried  = ff_stats.get('carrying', 0)
+        rescued  = ff_stats.get('rescued', 0) + carried
+        self.metrics.people_rescued = rescued
         score    = self.metrics.calculate_score(self.total_people)
         self.leaderboard_rank = save_score(
-            score, ff_stats.get('rescued', 0), self.total_people,
+            score, rescued, self.total_people,
             self.step, self.algorithm, NUM_FLOORS
         )
         self.leaderboard_data = get_top_scores()
@@ -637,6 +642,7 @@ def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar"):
         elif isinstance(result, tuple) and result[0] == 'ambulance':
             rescued = result[1]
             AmbulancePhase(rescued_count=rescued).run()
-            grids = create_all_floors()
+            pygame.quit()
+            return result[1]   # exit simulation entirely after ambulance
         else:
             return result

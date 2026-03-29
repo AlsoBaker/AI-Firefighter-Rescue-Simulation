@@ -95,7 +95,6 @@ def dijkstra(grid, start, goal, allow_fire=False, weights=None):
             EMPTY:        1,
             PERSON:       1,
             PERSON_DANGER:2,
-            SHELTER:      1,
             HOSPITAL:     1,
             STAIRCASE:    1,
             OBSTACLE:     float('inf'),

@@ -44,10 +44,11 @@ class Firefighter:
 class FirefighterManager:
 
     def __init__(self, num_firefighters=1, algorithm="astar"):
-        self.firefighters     = []
-        self.num_firefighters = num_firefighters
-        self.algorithm        = algorithm
-        self.floor_manager    = None
+        self.firefighters       = []
+        self.num_firefighters   = num_firefighters
+        self.algorithm          = algorithm
+        self.floor_manager      = None
+        self._total_extinguished = 0
 
     def set_floor_manager(self, fm):
         self.floor_manager = fm
@@ -120,13 +121,23 @@ class FirefighterManager:
         return (STAIR_ROW_START, col)
 
     # ----------------------------------------------------------
-    # Water drain while standing on fire
+    # Fire extinguishing
     # ----------------------------------------------------------
 
-    def _drain_water_on_fire(self, ff, grid):
+    def _extinguish_adjacent(self, ff, grid):
+        """Extinguish fire cells adjacent to FF if water > 0. Returns count extinguished."""
+        if ff.water <= 0:
+            return 0
         r, c = ff.pos
-        if grid[r, c] == FIRE and ff.water > 0:
-            ff.water = max(0, ff.water - WATER_FIRE_STEP)
+        extinguished = 0
+        for nr, nc in ((r+1,c),(r-1,c),(r,c+1),(r,c-1)):
+            if 0 <= nr < ROWS and 0 <= nc < COLS and grid[nr, nc] == FIRE:
+                grid[nr, nc] = EMPTY
+                ff.water = max(0, ff.water - WATER_EXTINGUISH)
+                extinguished += 1
+                if ff.water <= 0:
+                    break
+        return extinguished
 
     # ----------------------------------------------------------
     # Main move loop
@@ -231,6 +242,9 @@ class FirefighterManager:
             ff.pos        = next_pos
             grids[floor_idx][nr, nc] = FIREFIGHTER
 
+            # Extinguish adjacent fire after moving
+            self._total_extinguished += self._extinguish_adjacent(ff, grids[floor_idx])
+
         return grids
 
     def get_stats(self):
@@ -241,6 +255,7 @@ class FirefighterManager:
         return {
             'rescued':      total_rescued,
             'carrying':     carrying,
+            'extinguished': self._total_extinguished,
             'firefighters': len(self.firefighters),
             'total_stuck':  sum(ff.stuck_counter for ff in self.firefighters),
             'avg_hp':       avg_hp,

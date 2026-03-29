@@ -46,19 +46,28 @@ class FloorManager:
     def switch_floor(self, ff, direction):
         """
         Teleport firefighter to adjacent floor via matching staircase.
+        Tries STAIR_ROW_START first; if another FF is there, uses STAIR_ROW_END.
         Returns True if the switch was successful.
         """
         new_floor = ff.current_floor + direction
         if not (0 <= new_floor < self.num_floors):
             return False
 
-        # Arrive at the same staircase column on new floor
         arrival_col = STAIR_UP_COL if direction == +1 else STAIR_DOWN_COL
-        ff.current_floor = new_floor
-        ff.pos = (STAIR_ROW_START, arrival_col)
-        ff.under_cell = STAIRCASE
-        ff.current_path = []
-        return True
+        new_grid = self.grids[new_floor]
+
+        # Pick whichever staircase row on the new floor is not occupied by another FF
+        for arrival_row in (STAIR_ROW_START, STAIR_ROW_END):
+            cell = int(new_grid[arrival_row, arrival_col])
+            if cell == STAIRCASE:  # empty staircase — safe to arrive here
+                ff.current_floor = new_floor
+                ff.pos           = (arrival_row, arrival_col)
+                ff.under_cell    = STAIRCASE
+                ff.current_path  = []
+                return True
+
+        # Both staircase cells occupied — wait on current floor
+        return False
 
     # ------------------------------------------------------------------
     # Cross-floor targeting helpers

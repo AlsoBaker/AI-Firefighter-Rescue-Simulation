@@ -6,8 +6,8 @@ import numpy as np
 from city_map import (
     generate_city, get_passable,
     ROAD, BUILDING, INTERSECTION, FIRE_STATION, HOSPITAL,
-    PARK, RIVER, BRIDGE,
-    CITY_COLS, CITY_ROWS,
+    RIVER, BRIDGE,
+    CITY_COLS, CITY_ROWS, BLOCK_SIZE,
 )
 
 pygame.init()
@@ -108,11 +108,12 @@ class TrafficCar:
         self.color     = color
         self.dir       = list(rng.choice(self.DIRS))
         self.timer     = 0
-        self.interval  = int(rng.integers(30, 60))  # frames between moves
+        self.interval  = int(rng.integers(30, 60))
         self._grid     = grid
         self._passable = get_passable()
 
-    def update(self):
+    def update(self, occupied):
+        """Move one step. occupied = set of (r,c) positions of other cars."""
         self.timer += 1
         if self.timer < self.interval:
             return
@@ -120,10 +121,10 @@ class TrafficCar:
         nr = self.r + self.dir[0]
         nc = self.c + self.dir[1]
         if (0 <= nr < CITY_ROWS and 0 <= nc < CITY_COLS and
-                self._grid[nr, nc] in self._passable):
+                self._grid[nr, nc] in self._passable and
+                (nr, nc) not in occupied):
             self.r, self.c = nr, nc
         else:
-            # bounce: reverse direction
             self.dir = [-self.dir[0], -self.dir[1]]
 
     def draw(self, screen):
@@ -148,8 +149,9 @@ class AmbulancePhase:
     def _reset(self):
         rng = np.random.default_rng()
         result = generate_city(seed=int(rng.integers(0, 99999)))
-        (self.grid, self.fire_station, self.hospitals,
-         self.building_colors, self.road_names, self.river_row) = result
+        (self.grid, self.fire_station, self.hospitals, self.hospital_blocks,
+         self.fs_block, self.building_colors, self.road_names, self.river_row,
+         self.block_sprites) = result
 
         self._find_best_path()
         self._load_images()
@@ -165,10 +167,19 @@ class AmbulancePhase:
         self.cars = [TrafficCar(r, c, colors[i], self.grid, trng)
                      for i, (r, c) in enumerate(road_cells[:6])]
 
+        # Ambulance starts visually at the centre of the big firestation block
+        ext_rows = sorted(range(0, CITY_ROWS, BLOCK_SIZE)) + [CITY_ROWS]
+        ext_cols = sorted(range(0, CITY_COLS, BLOCK_SIZE)) + [CITY_COLS]
+        fs_bi, fs_ci = self.fs_block
+        fs_bx, fs_by = _px(ext_rows[fs_bi] + 1, ext_cols[fs_ci] + 1)
+        block_px = (BLOCK_SIZE - 1) * CELL_SIZE
+        fs_cx = fs_bx + block_px // 2
+        fs_cy = fs_by + block_px // 2
+
         # Ambulance state
         self.path_idx   = 0
         self.progress   = 0.0
-        self.amb_pos    = _centre(*self.fire_station)
+        self.amb_pos    = (fs_cx, fs_cy)
         self.trail      = []          # list of pixel positions
         self.delivered  = False
         self.elapsed    = 0
@@ -189,8 +200,16 @@ class AmbulancePhase:
 
     def _load_images(self):
         cs = CELL_SIZE
-        self.img_amb  = _load("ambulance.png", (cs, cs))
-        self.img_hosp = _load("hospital.png",  (cs, cs))
+        self.img_amb       = _load("ambulance.png",  (cs, cs))
+        block_px = (BLOCK_SIZE - 1) * cs
+        self.block_px      = block_px
+        self.img_hosp      = _load("hospital.png",    (block_px, block_px))
+        self.img_firestation = _load("firestation.png", (block_px, block_px))
+        # Load building images; filter out None so we always have valid images to cycle
+        raw = [_load(f"building{i+1}.png", (block_px, block_px)) for i in range(10)]
+        self.img_buildings = [img for img in raw if img is not None]
+        if not self.img_buildings:
+            self.img_buildings = None  # no building images available
 
     # ── Update ────────────────────────────────────────────────────────────────
     def update(self, dt):
@@ -204,8 +223,10 @@ class AmbulancePhase:
             self.siren_r -= 1
             if self.siren_r <= CELL_SIZE // 2: self.siren_grow = True
 
+        occupied = {(car.r, car.c) for car in self.cars}
         for car in self.cars:
-            car.update()
+            other = occupied - {(car.r, car.c)}
+            car.update(other)
 
         if self.delivered:
             return
@@ -247,6 +268,8 @@ class AmbulancePhase:
     def draw(self):
         self.screen.fill(C_BG)
         self._draw_city()
+        self._draw_building_sprites()
+        self._draw_hospital_blocks()
         self._draw_trail()
         self._draw_path()
         self._draw_cars()
@@ -259,6 +282,12 @@ class AmbulancePhase:
 
     def _draw_city(self):
         cs = CELL_SIZE
+        road_rows_set = set(range(0, CITY_ROWS, BLOCK_SIZE))
+        road_cols_set = set(range(0, CITY_COLS, BLOCK_SIZE))
+        road_rows_list = sorted(road_rows_set)
+        road_cols_list = sorted(road_cols_set)
+
+        # Pass 1 — draw all cells (backgrounds, roads, etc.)
         for r in range(CITY_ROWS):
             for c in range(CITY_COLS):
                 x, y = _px(r, c)
@@ -267,7 +296,6 @@ class AmbulancePhase:
                 if cell == BUILDING:
                     col = self.building_colors.get((r, c), (50, 50, 64))
                     pygame.draw.rect(self.screen, col, (x, y, cs, cs))
-                    pygame.draw.rect(self.screen, C_BUILDING_LN, (x, y, cs, cs), 1)
 
                 elif cell == ROAD:
                     pygame.draw.rect(self.screen, C_ROAD, (x, y, cs, cs))
@@ -298,13 +326,6 @@ class AmbulancePhase:
                             if surf.get_width() <= cs:
                                 self.screen.blit(surf, (x + 1, y + 1 + pi * 8))
 
-                elif cell == PARK:
-                    pygame.draw.rect(self.screen, C_PARK, (x, y, cs, cs))
-                    # Tree dots
-                    for tr in range(y + 3, y + cs - 2, max(4, cs//3)):
-                        for tc in range(x + 3, x + cs - 2, max(4, cs//3)):
-                            pygame.draw.circle(self.screen, C_PARK_CANOPY, (tc, tr), max(2, cs//6))
-
                 elif cell == RIVER:
                     pygame.draw.rect(self.screen, C_RIVER, (x, y, cs, cs))
                     # Shimmer line
@@ -326,17 +347,57 @@ class AmbulancePhase:
                     self.screen.blit(lbl, (x + 1, y + 1))
 
                 elif cell == HOSPITAL:
-                    is_target = ((r, c) == self.target_hosp)
                     pygame.draw.rect(self.screen, C_HOSP, (x, y, cs, cs))
-                    if is_target:
-                        pygame.draw.rect(self.screen, C_HOSP_TARGET,
-                                         (x-2, y-2, cs+4, cs+4), 2)
-                    if self.img_hosp:
-                        if not is_target:
-                            dim = self.img_hosp.copy(); dim.set_alpha(140)
-                            self.screen.blit(dim, (x, y))
-                        else:
-                            self.screen.blit(self.img_hosp, (x, y))
+
+    def _draw_building_sprites(self):
+        """Pass 2 — draw building + firestation images over blocks."""
+        cs = CELL_SIZE
+        ext_rows = sorted(range(0, CITY_ROWS, BLOCK_SIZE)) + [CITY_ROWS]
+        ext_cols = sorted(range(0, CITY_COLS, BLOCK_SIZE)) + [CITY_COLS]
+        imgs = self.img_buildings  # already filtered — all entries are valid
+        n_imgs = len(imgs) if imgs else 0
+        for bi, r0 in enumerate(ext_rows[:-1]):
+            for ci, c0 in enumerate(ext_cols[:-1]):
+                sprite_idx = self.block_sprites.get((bi, ci), 0)
+                x, y = _px(r0 + 1, c0 + 1)
+                if sprite_idx == -1:
+                    continue  # hospital — drawn in _draw_hospital_blocks
+                elif sprite_idx == -2:
+                    # Fire station big block
+                    if self.img_firestation:
+                        self.screen.blit(self.img_firestation, (x, y))
+                elif n_imgs > 0:
+                    # Cycle through available images so no block is ever empty
+                    img = imgs[sprite_idx % n_imgs]
+                    self.screen.blit(img, (x, y))
+
+    def _draw_hospital_blocks(self):
+        """Draw big hospital image + target highlight over hospital blocks."""
+        cs = CELL_SIZE
+        ext_rows = sorted(range(0, CITY_ROWS, BLOCK_SIZE)) + [CITY_ROWS]
+        ext_cols = sorted(range(0, CITY_COLS, BLOCK_SIZE)) + [CITY_COLS]
+        hosp_set = set(map(tuple, self.hospital_blocks))
+        target_block = None
+        # Find which hospital block corresponds to target_hosp
+        for i, hpos in enumerate(self.hospitals):
+            if hpos == self.target_hosp and i < len(self.hospital_blocks):
+                target_block = tuple(self.hospital_blocks[i])
+                break
+        for bi, ci in self.hospital_blocks:
+            r0 = ext_rows[bi]; c0 = ext_cols[ci]
+            x, y = _px(r0 + 1, c0 + 1)
+            bpx = self.block_px
+            is_target = (bi, ci) == target_block
+            if is_target:
+                # Yellow highlight border around the block
+                pygame.draw.rect(self.screen, C_HOSP_TARGET,
+                                 (x - 3, y - 3, bpx + 6, bpx + 6), 3)
+            if self.img_hosp:
+                if not is_target:
+                    dim = self.img_hosp.copy(); dim.set_alpha(160)
+                    self.screen.blit(dim, (x, y))
+                else:
+                    self.screen.blit(self.img_hosp, (x, y))
 
     def _draw_trail(self):
         if len(self.trail) < 2:
@@ -434,7 +495,6 @@ class AmbulancePhase:
             ((52,52,68),   "Building"),
             (C_FIRE_ST,    "Fire station (start)"),
             (C_HOSP,       "Hospital (target)"),
-            (C_PARK,       "Park (impassable)"),
             (C_RIVER,      "River (impassable)"),
             (C_BRIDGE,     "Bridge (crossable)"),
             (C_PATH_DONE,  "Travelled path"),
@@ -485,3 +545,4 @@ class AmbulancePhase:
             self.update(dt)
             self.draw()
             self.clock.tick(60)
+        pygame.quit()
