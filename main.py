@@ -11,7 +11,7 @@ from firetruck import FiretruckPhase
 
 
 def main():
-    num_firefighters = 1
+    num_firefighters = 4
     max_steps        = 300
     algorithm        = "astar"
     seed             = None
@@ -86,16 +86,25 @@ def main():
             pygame.quit()
             return None
 
-        city_data, burning_road_pos = ft_result
+        city_data, burning_road_pos, cfg = ft_result
         pygame.event.clear()   # discard events accumulated during firetruck phase
+
+        # Use player-configured values from the mission briefing panel.
+        # CLI args serve as fallback defaults if the panel wasn't shown.
+        run_ff    = cfg.get('num_firefighters', num_firefighters)
+        run_algo  = cfg.get('algorithm',        algorithm)
+        run_steps = cfg.get('max_steps',        max_steps)
+        run_seed  = cfg.get('seed',             seed)
+        if run_seed is not None:
+            np.random.seed(run_seed)
 
         # Phase 2 + 3: rescue sim → ambulance
         grids   = create_all_floors()
         result  = run_simulation(
             grids,
-            num_firefighters = num_firefighters,
-            max_steps        = max_steps,
-            algorithm        = algorithm,
+            num_firefighters = run_ff,
+            max_steps        = run_steps,
+            algorithm        = run_algo,
             city_data        = city_data,
             burning_road_pos = burning_road_pos,
         )

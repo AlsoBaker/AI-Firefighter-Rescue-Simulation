@@ -106,6 +106,34 @@ class FireParticle:
                                (int(self.x), int(self.y)), 2)
 
 
+class SmokeParticle:
+    """Grey smoke rising from fire cells."""
+    def __init__(self, x, y):
+        self.x     = x + np.random.uniform(-6, 6)
+        self.y     = y
+        self.vx    = np.random.uniform(-0.3, 0.3)
+        self.vy    = np.random.uniform(-0.8, -0.3)
+        self.life  = np.random.randint(160, 230)
+        self.decay = np.random.uniform(2, 5)
+        self.r     = np.random.randint(3, 6)
+
+    def update(self):
+        self.x    += self.vx
+        self.y    += self.vy
+        self.life -= self.decay
+        self.vx   *= 0.98
+        return self.life > 0
+
+    def draw(self, screen):
+        if self.life > 0:
+            alpha = int(self.life * 0.6)
+            grey  = min(200, int(self.life))
+            surf  = pygame.Surface((self.r * 2, self.r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (grey, grey, grey, alpha),
+                               (self.r, self.r), self.r)
+            screen.blit(surf, (int(self.x) - self.r, int(self.y) - self.r))
+
+
 class PygameSimulation:
 
     def __init__(self, grids, num_firefighters=1, max_steps=300, algorithm="astar"):
@@ -142,8 +170,9 @@ class PygameSimulation:
         self.leaderboard_rank  = None  # rank if made top 10
         self.leaderboard_data  = []
 
-        self.fire_particles = []
-        self.anim_frame     = 0
+        self.fire_particles  = []
+        self.smoke_particles = []
+        self.anim_frame      = 0
 
         self.screen = pygame.display.set_mode(
             (SCREEN_W, SCREEN_H), pygame.FULLSCREEN
@@ -226,12 +255,14 @@ class PygameSimulation:
 
     def update(self):
         if not self.simulation_active or self.paused:
-            self.fire_particles = [p for p in self.fire_particles if p.update()]
+            self.fire_particles  = [p for p in self.fire_particles  if p.update()]
+            self.smoke_particles = [p for p in self.smoke_particles if p.update()]
             self.anim_frame += 1
             return
 
         if self.anim_frame % max(1, int(10 / self.speed)) != 0:
-            self.fire_particles = [p for p in self.fire_particles if p.update()]
+            self.fire_particles  = [p for p in self.fire_particles  if p.update()]
+            self.smoke_particles = [p for p in self.smoke_particles if p.update()]
             self.anim_frame += 1
             return
 
@@ -256,10 +287,12 @@ class PygameSimulation:
         stats    = self.metrics.update(self.grids, ff_stats)
 
         for pos in np.argwhere(self.grids[self.active_floor] == FIRE):
+            px = GRID_X + pos[1] * CELL_SIZE + CELL_SIZE // 2
+            py = GRID_Y + pos[0] * CELL_SIZE + CELL_SIZE // 2
             if np.random.random() < 0.18:
-                px = GRID_X + pos[1] * CELL_SIZE + CELL_SIZE // 2
-                py = GRID_Y + pos[0] * CELL_SIZE + CELL_SIZE // 2
                 self.fire_particles.append(FireParticle(px, py))
+            if np.random.random() < 0.12:
+                self.smoke_particles.append(SmokeParticle(px, py))
 
         if stats['safe'] == 0 and stats['danger'] == 0:
             self.simulation_active = False
@@ -270,7 +303,8 @@ class PygameSimulation:
             self.end_reason        = "Max steps reached"
             self._finish()
 
-        self.fire_particles = [p for p in self.fire_particles if p.update()]
+        self.fire_particles  = [p for p in self.fire_particles  if p.update()]
+        self.smoke_particles = [p for p in self.smoke_particles if p.update()]
         self.anim_frame += 1
 
     def _finish(self):
@@ -334,8 +368,16 @@ class PygameSimulation:
     # ----------------------------------------------------------
 
     def _draw_grid(self):
-        grid = self.grids[self.active_floor]
+        grid      = self.grids[self.active_floor]
+        cs        = CELL_SIZE
+        frame     = self.anim_frame
+        floor_idx = self.active_floor
 
+        # Per-floor subtle floor tint: ground floor warmer, top floor cooler
+        floor_tints = [(52, 46, 40), (44, 44, 48), (38, 42, 50)]
+        floor_tile  = floor_tints[min(floor_idx, 2)]
+
+        # ── Pass 1: backgrounds + details (skip STAIRCASE) ───────────────────
         for r in range(ROWS):
             for c in range(COLS):
                 x    = GRID_X + c * CELL_SIZE
@@ -345,21 +387,91 @@ class PygameSimulation:
                 if cell == STAIRCASE:
                     continue
 
-                if   cell == FIRE:        bg = C_FIRE[self.anim_frame % 3]
-                elif cell == OBSTACLE:    bg = C_OBSTACLE
-                elif cell == HOSPITAL:    bg = C_HOSP_BG
-                elif cell == PERSON:      bg = C_PERSON_BG
-                elif cell == PERSON_DANGER: bg = C_DANGER_BG
-                elif cell == FIREFIGHTER: bg = C_FF_BG
-                else:                     bg = C_EMPTY
+                # ── Floor tile (EMPTY) ────────────────────────────────────────
+                if cell == EMPTY:
+                    pygame.draw.rect(self.screen, floor_tile, (x, y, cs, cs))
+                    # Subtle grout lines every cell
+                    gc = (floor_tile[0]+8, floor_tile[1]+8, floor_tile[2]+8)
+                    pygame.draw.line(self.screen, gc, (x, y), (x+cs-1, y), 1)
+                    pygame.draw.line(self.screen, gc, (x, y), (x, y+cs-1), 1)
+                    # Checkerboard micro-variation
+                    if (r + c) % 2 == 0:
+                        sl = (floor_tile[0]+4, floor_tile[1]+4, floor_tile[2]+4)
+                        pygame.draw.rect(self.screen, sl, (x+1, y+1, cs-2, cs-2))
 
-                pygame.draw.rect(self.screen, bg,     (x, y, CELL_SIZE, CELL_SIZE))
-                pygame.draw.rect(self.screen, C_GRID, (x, y, CELL_SIZE, CELL_SIZE), 1)
+                # ── Wall / obstacle (3D bevel) ────────────────────────────────
+                elif cell == OBSTACLE:
+                    base   = (72, 68, 64)
+                    hilit  = (105, 100, 94)   # top-left highlight
+                    shadow = (38, 35, 32)      # bottom-right shadow
+                    pygame.draw.rect(self.screen, base,   (x,    y,    cs,   cs))
+                    # Bevel: top + left bright
+                    pygame.draw.line(self.screen, hilit, (x, y),      (x+cs-1, y),      2)
+                    pygame.draw.line(self.screen, hilit, (x, y),      (x,      y+cs-1), 2)
+                    # Bevel: bottom + right dark
+                    pygame.draw.line(self.screen, shadow, (x, y+cs-1),(x+cs-1, y+cs-1), 2)
+                    pygame.draw.line(self.screen, shadow, (x+cs-1, y),(x+cs-1, y+cs-1), 2)
+                    # Inner cross-hatch for brick texture
+                    if cs >= 16:
+                        ht = (58, 54, 50)
+                        mid = cs // 2
+                        pygame.draw.line(self.screen, ht, (x+4, y+mid), (x+cs-4, y+mid), 1)
+                        pygame.draw.line(self.screen, ht, (x+mid, y+4), (x+mid, y+cs-4), 1)
 
-                if   cell == PERSON        and self.img_civilian:  self.screen.blit(self.img_civilian, (x, y))
-                elif cell == PERSON_DANGER and self.img_danger:    self.screen.blit(self.img_danger,   (x, y))
-                elif cell == FIREFIGHTER   and self.img_ff:        self.screen.blit(self.img_ff,       (x, y))
-                elif cell == HOSPITAL      and self.img_hospital:  self.screen.blit(self.img_hospital, (x, y))
+                # ── Fire (original animated colour cycle) ────────────────
+                elif cell == FIRE:
+                    bg = C_FIRE[frame % 3]
+                    pygame.draw.rect(self.screen, bg, (x, y, cs, cs))
+
+                # ── Hospital (green border + cross) ───────────────────────────
+                elif cell == HOSPITAL:
+                    pygame.draw.rect(self.screen, (28, 44, 52), (x, y, cs, cs))
+                    # Green border
+                    pygame.draw.rect(self.screen, (30, 140, 80),
+                                     (x, y, cs, cs), 2)
+                    # White cross
+                    cw = max(2, cs // 5)
+                    ch = max(6, cs * 2 // 3)
+                    mx, my = x + cs // 2, y + cs // 2
+                    pygame.draw.rect(self.screen, (220, 240, 225),
+                                     (mx - cw//2, my - ch//2, cw, ch))
+                    pygame.draw.rect(self.screen, (220, 240, 225),
+                                     (mx - ch//2, my - cw//2, ch, cw))
+                    if self.img_hospital:
+                        self.screen.blit(self.img_hospital, (x, y))
+
+                # ── Person (safe — soft green background) ─────────────────────
+                elif cell == PERSON:
+                    pygame.draw.rect(self.screen, (26, 60, 30), (x, y, cs, cs))
+                    pygame.draw.rect(self.screen, (40, 120, 55),
+                                     (x, y, cs, cs), 1)
+                    if self.img_civilian:
+                        self.screen.blit(self.img_civilian, (x, y))
+
+                # ── Person danger (pulsing orange glow) ───────────────────────
+                elif cell == PERSON_DANGER:
+                    pulse = abs(np.sin(frame * 0.15))
+                    rb    = int(90 + 50 * pulse)
+                    pygame.draw.rect(self.screen, (rb, 35, 5), (x, y, cs, cs))
+                    # Pulsing border
+                    bc = (255, int(120 + 80 * pulse), 0)
+                    pygame.draw.rect(self.screen, bc, (x, y, cs, cs), 2)
+                    if self.img_danger:
+                        self.screen.blit(self.img_danger, (x, y))
+
+                # ── Firefighter (warm gold background) ────────────────────────
+                elif cell == FIREFIGHTER:
+                    pygame.draw.rect(self.screen, (65, 48, 10), (x, y, cs, cs))
+                    pygame.draw.rect(self.screen, (180, 130, 30),
+                                     (x, y, cs, cs), 1)
+                    if self.img_ff:
+                        self.screen.blit(self.img_ff, (x, y))
+
+                else:
+                    pygame.draw.rect(self.screen, floor_tile, (x, y, cs, cs))
+
+                # Grid line
+                pygame.draw.rect(self.screen, C_GRID, (x, y, cs, cs), 1)
 
                 # HP bars for civilians
                 if cell in (PERSON, PERSON_DANGER):
@@ -374,22 +486,32 @@ class PygameSimulation:
                             self._draw_water_bar(x, y, ff.water)
                             break
 
-        # Staircase cells (1x1)
-        for c in (STAIR_UP_COL, STAIR_DOWN_COL):
-            for r in (STAIR_ROW_START, STAIR_ROW_END):
-                if int(grid[r, c]) != STAIRCASE:
+        # ── Pass 2: staircase cells ───────────────────────────────────────────
+        for col in (STAIR_UP_COL, STAIR_DOWN_COL):
+            for row in (STAIR_ROW_START, STAIR_ROW_END):
+                if int(grid[row, col]) != STAIRCASE:
                     continue
-                x = GRID_X + c * CELL_SIZE
-                y = GRID_Y + r * CELL_SIZE
-                pygame.draw.rect(self.screen, C_STAIR_BG,  (x, y, CELL_SIZE, CELL_SIZE))
-                pygame.draw.rect(self.screen, C_GRID,      (x, y, CELL_SIZE, CELL_SIZE), 1)
-                arrow = "^" if c == STAIR_UP_COL else "v"
-                lbl   = F_TINY.render(arrow, True, (160, 200, 255))
-                self.screen.blit(lbl, (x + CELL_SIZE - lbl.get_width() - 2, y + 2))
+                x = GRID_X + col * CELL_SIZE
+                y = GRID_Y + row * CELL_SIZE
+                # Background
+                pygame.draw.rect(self.screen, (22, 48, 72), (x, y, cs, cs))
+                # Step lines
+                step_col = (50, 90, 130)
+                n_steps  = max(3, cs // 8)
+                for si in range(n_steps):
+                    sy = y + int(cs * si / n_steps)
+                    pygame.draw.line(self.screen, step_col,
+                                     (x + 2, sy), (x + cs - 2, sy), 1)
+                # Direction arrow text
+                arrow = "▲" if col == STAIR_UP_COL else "▼"
+                lbl   = F_TINY.render(arrow, True, (140, 190, 255))
+                self.screen.blit(lbl, (x + cs - lbl.get_width() - 2, y + 2))
+                # Border
+                pygame.draw.rect(self.screen, (60, 110, 170), (x, y, cs, cs), 1)
                 if self.img_staircase:
                     self.screen.blit(self.img_staircase, (x, y))
 
-        # FFs standing on staircase
+        # ── Pass 3: FFs standing on staircases ───────────────────────────────
         if self.ff_manager:
             for ff in self.ff_manager.firefighters:
                 if ff.current_floor != self.active_floor:
@@ -398,12 +520,18 @@ class PygameSimulation:
                 if int(grid[r, c]) == STAIRCASE:
                     x = GRID_X + c * CELL_SIZE
                     y = GRID_Y + r * CELL_SIZE
-                    if self.img_ff: self.screen.blit(self.img_ff, (x, y))
+                    if self.img_ff:
+                        self.screen.blit(self.img_ff, (x, y))
                     self._draw_hp_bar(x, y, ff.hp, FF_MAX_HP, has_water_bar=True)
                     self._draw_water_bar(x, y, ff.water)
 
-        pygame.draw.rect(self.screen, C_PANEL_LINE,
-                         (GRID_X - 1, GRID_Y - 1, GRID_W + 2, GRID_H + 2), 1)
+        # ── Room frame ───────────────────────────────────────────────────────
+        # Thick outer border to suggest building walls
+        pygame.draw.rect(self.screen, (55, 50, 45),
+                         (GRID_X - 3, GRID_Y - 3, GRID_W + 6, GRID_H + 6), 3)
+        pygame.draw.rect(self.screen, (30, 27, 24),
+                         (GRID_X - 6, GRID_Y - 6, GRID_W + 12, GRID_H + 12), 3)
+
 
     # ----------------------------------------------------------
     # Floor tabs
@@ -627,6 +755,8 @@ class PygameSimulation:
         self._draw_grid()
         for p in self.fire_particles:
             p.draw(self.screen)
+        for p in self.smoke_particles:
+            p.draw(self.screen)
         self._draw_panel()
         if self.show_end_screen:
             self._draw_end_screen()
@@ -637,9 +767,8 @@ class PygameSimulation:
     # ----------------------------------------------------------
 
     def run(self):
-        # Flush any stale events from previous phases (e.g. the R keypress
-        # from the ambulance phase, or display events from window recreation).
-        # Without this, the sim can exit on its very first frame.
+        # Flush stale events from previous phases so the sim never exits
+        # on its first frame due to a leftover keypress or display event.
         pygame.event.clear()
         running = True
         while running:
@@ -671,14 +800,13 @@ def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar",
         if result == 'reset':
             grids = create_all_floors()
         elif isinstance(result, tuple) and result[0] == 'ambulance':
-            rescued = result[1]
+            rescued    = result[1]
             amb_result = AmbulancePhase(rescued_count=rescued,
                                         city_data=city_data,
                                         start_pos=burning_road_pos).run()
             if amb_result == 'restart':
-                # Keep pygame alive — FiretruckPhase reinits the display.
-                # Calling pygame.quit() here would invalidate module-level
-                # fonts in city_phase_base.py, causing a crash on restart.
+                # R pressed in ambulance — restart the whole pipeline.
+                # Do NOT call pygame.quit() here; fonts would be invalidated.
                 return 'restart'
             pygame.quit()
             return result[1]

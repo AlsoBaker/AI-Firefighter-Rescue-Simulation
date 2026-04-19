@@ -299,7 +299,7 @@ class AmbulancePhase(BaseCityPhase):
             y += 17
 
         div()
-        for line in ["UP/DN  Speed", "R      New city", "ESC    Quit"]:
+        for line in ["UP/DN  Speed", "R      New Simulation", "ESC    Quit"]:
             self.screen.blit(F_TINY().render(line, True, C_TEXT_DIM), (14, y))
             y += 16
 
@@ -312,7 +312,7 @@ class AmbulancePhase(BaseCityPhase):
         pygame.draw.rect(self.screen, C_GREEN,      (bx,by,bw,bh), 2, border_radius=10)
         l1 = F_LARGE().render(f"Delivered!  {self.rescued_count} civilians safe", True, C_GREEN)
         l2 = F_SMALL().render(
-            f"Route: {self.path_length} cells     R = new city     ESC = quit",
+            f"Route: {self.path_length} cells     R = New Simulation     ESC = quit",
             True, C_TEXT_DIM)
         self.screen.blit(l1, (bx+(bw-l1.get_width())//2, by+8))
         self.screen.blit(l2, (bx+(bw-l2.get_width())//2, by+48))

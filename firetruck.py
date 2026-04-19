@@ -77,6 +77,16 @@ class FiretruckPhase(BaseCityPhase):
         # Cutscene
         self.cutscene_t = 0.0
 
+        # Config panel defaults (shown after cutscene)
+        self.cfg_firefighters = 4
+        self.cfg_algorithm    = 'astar'
+        self.cfg_steps        = 300
+        self.cfg_seed         = None       # None = random
+        self.cfg_use_seed     = False
+        self.cfg_seed_val     = 42         # value shown when seed is enabled
+        self._btn_rects       = {}         # populated by _draw_config, read by handle_events
+        self._hovered_btn     = None
+
         # Animation + particles
         self.anim_frame     = 0
         self.fire_particles = []
@@ -137,6 +147,13 @@ class FiretruckPhase(BaseCityPhase):
                 else:
                     self.hovered_block = None
 
+        mx, my = pygame.mouse.get_pos()
+        self._hovered_btn = None
+        for name, rect in self._btn_rects.items():
+            if rect.collidepoint(mx, my):
+                self._hovered_btn = name
+                break
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
@@ -144,15 +161,19 @@ class FiretruckPhase(BaseCityPhase):
                 k = event.key
                 if   k == pygame.K_ESCAPE:
                     return False
-                elif k == pygame.K_r:
+                elif k == pygame.K_r and self.state != 'config':
                     self._reset()
                 elif k == pygame.K_UP   and self.state == 'driving':
                     self.speed = min(12.0, self.speed + 1.0)
                 elif k == pygame.K_DOWN and self.state == 'driving':
                     self.speed = max(1.0,  self.speed - 1.0)
+                elif self.state == 'config':
+                    self._handle_config_key(k)
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 if self.state == 'selecting' and self.hovered_block:
                     self._select_building(self.hovered_block)
+                elif self.state == 'config':
+                    self._handle_config_click(mx, my)
 
         return True
 
@@ -182,7 +203,7 @@ class FiretruckPhase(BaseCityPhase):
         elif self.state == 'cutscene':
             self.cutscene_t += dt
             if self.cutscene_t >= self.CUTSCENE_DURATION:
-                self.state = 'done'
+                self.state = 'config'
 
         if self.burning_block and self.state in ('driving', 'cutscene'):
             self._spawn_fire_particles()
@@ -228,10 +249,12 @@ class FiretruckPhase(BaseCityPhase):
     def draw(self):
         if self.state == 'cutscene':
             self._draw_cutscene()
+        elif self.state == 'config':
+            self._draw_config()
         else:
             self.screen.fill(C_BG)
             self._draw_city()
-            self._draw_traffic_lights()       # visual parity; firetruck ignores them
+            self._draw_traffic_lights()
             self._draw_building_sprites()
             self._draw_hospital_blocks()
 
@@ -354,6 +377,230 @@ class FiretruckPhase(BaseCityPhase):
             fs.set_alpha(fade_alpha)
             self.screen.blit(fs, (0, 0))
 
+    # ── Config panel helpers ─────────────────────────────────────────────────
+
+    ALGORITHMS = ['astar', 'bfs', 'dijkstra', 'dstar_lite']
+    ALGO_LABELS = ['A*', 'BFS', 'DIJKSTRA', 'D* LITE']
+
+    def _handle_config_key(self, k):
+        if k == pygame.K_RETURN or k == pygame.K_SPACE:
+            self.state = 'done'
+        elif k == pygame.K_LEFT:
+            self.cfg_firefighters = max(1, self.cfg_firefighters - 1)
+        elif k == pygame.K_RIGHT:
+            self.cfg_firefighters = min(8, self.cfg_firefighters + 1)
+
+    def _handle_config_click(self, mx, my):
+        for name, rect in self._btn_rects.items():
+            if not rect.collidepoint(mx, my):
+                continue
+            if name == 'ff_minus':
+                self.cfg_firefighters = max(1, self.cfg_firefighters - 1)
+            elif name == 'ff_plus':
+                self.cfg_firefighters = min(8, self.cfg_firefighters + 1)
+            elif name.startswith('algo_'):
+                self.cfg_algorithm = name[5:]
+            elif name == 'steps_minus':
+                self.cfg_steps = max(50, self.cfg_steps - 50)
+            elif name == 'steps_plus':
+                self.cfg_steps = min(1000, self.cfg_steps + 50)
+            elif name == 'seed_toggle':
+                self.cfg_use_seed = not self.cfg_use_seed
+            elif name == 'seed_minus':
+                self.cfg_seed_val = max(0, self.cfg_seed_val - 1)
+            elif name == 'seed_plus':
+                self.cfg_seed_val += 1
+            elif name == 'deploy':
+                self.state = 'done'
+            break
+
+    def _draw_config(self):
+        """Full-screen mission briefing / config panel shown after cutscene."""
+        # Keep the black background from the cutscene fade
+        self.screen.fill((0, 0, 0))
+        self._btn_rects = {}
+
+        # ── Panel geometry ────────────────────────────────────────────────────
+        PW, PH = 720, 530
+        PX     = (SCREEN_W - PW) // 2
+        PY     = (SCREEN_H - PH) // 2
+
+        # Drop shadow
+        sh = pygame.Surface((PW + 16, PH + 16), pygame.SRCALPHA)
+        sh.fill((0, 0, 0, 120))
+        self.screen.blit(sh, (PX - 8, PY - 8))
+
+        # Panel body
+        pygame.draw.rect(self.screen, (18, 20, 28), (PX, PY, PW, PH), border_radius=12)
+        pygame.draw.rect(self.screen, (255, 140, 0), (PX, PY, PW, PH), 2, border_radius=12)
+
+        # ── Title bar ─────────────────────────────────────────────────────────
+        title_h = 64
+        pygame.draw.rect(self.screen, (28, 18, 8),
+                         (PX, PY, PW, title_h), border_radius=12)
+        pygame.draw.rect(self.screen, (255, 140, 0),
+                         (PX, PY + title_h - 1, PW, 1))
+
+        t1 = F_LARGE().render("MISSION BRIEFING", True, (255, 200, 60))
+        t2 = F_SMALL().render("Configure your firefighter deployment before entering the building",
+                               True, (160, 130, 80))
+        self.screen.blit(t1, (PX + (PW - t1.get_width()) // 2, PY + 8))
+        self.screen.blit(t2, (PX + (PW - t2.get_width()) // 2, PY + 38))
+
+        # ── Layout constants ──────────────────────────────────────────────────
+        COL_L  = PX + 40           # label left edge
+        COL_R  = PX + PW - 40      # controls right edge
+        ROW_H  = 88                # row height
+        row_y  = PY + title_h + 16
+
+        def section_label(text, y):
+            lbl = F_TINY().render(text.upper(), True, (120, 110, 80))
+            self.screen.blit(lbl, (COL_L, y))
+
+        def divider(y):
+            pygame.draw.line(self.screen, (40, 38, 32),
+                             (COL_L, y), (PX + PW - COL_L + PX, y), 1)
+
+        def pill_btn(label, x, y, w, h, active, name, accent=(255,140,0)):
+            rect = pygame.Rect(x, y, w, h)
+            self._btn_rects[name] = rect
+            hov  = (self._hovered_btn == name)
+            if active:
+                bg   = accent
+                tc   = (10, 8, 4)
+                bord = accent
+            elif hov:
+                bg   = (45, 42, 35)
+                tc   = (220, 200, 140)
+                bord = (120, 100, 50)
+            else:
+                bg   = (28, 26, 22)
+                tc   = (130, 120, 90)
+                bord = (55, 50, 38)
+            pygame.draw.rect(self.screen, bg,   rect, border_radius=6)
+            pygame.draw.rect(self.screen, bord, rect, 1, border_radius=6)
+            surf = F_SMALL().render(label, True, tc)
+            self.screen.blit(surf, (x + (w - surf.get_width()) // 2,
+                                    y + (h - surf.get_height()) // 2))
+
+        def pm_btn(symbol, x, y, size, name):
+            rect = pygame.Rect(x, y, size, size)
+            self._btn_rects[name] = rect
+            hov  = (self._hovered_btn == name)
+            bg   = (60, 55, 40) if hov else (35, 32, 24)
+            pygame.draw.rect(self.screen, bg,            rect, border_radius=size//2)
+            pygame.draw.rect(self.screen, (120, 100, 50), rect, 1, border_radius=size//2)
+            surf = F_MEDIUM().render(symbol, True, (230, 200, 100))
+            self.screen.blit(surf, (x + (size - surf.get_width()) // 2,
+                                    y + (size - surf.get_height()) // 2))
+
+        # ══ Row 1 — Firefighters ══════════════════════════════════════════════
+        section_label("Firefighters", row_y)
+        ry = row_y + 18
+        btn_sz = 32
+
+        # Value display
+        val_surf = F_LARGE().render(str(self.cfg_firefighters), True, (255, 200, 60))
+        val_cx   = PX + PW // 2
+        self.screen.blit(val_surf, (val_cx - val_surf.get_width() // 2, ry))
+
+        # Minus / Plus
+        pm_btn("−", val_cx - 80 - btn_sz, ry + 2, btn_sz, 'ff_minus')
+        pm_btn("+", val_cx + 80,            ry + 2, btn_sz, 'ff_plus')
+
+        # Dot indicators
+        dot_y  = ry + 40
+        dot_r  = 7
+        dot_spacing = 20
+        total_w = 8 * dot_spacing
+        dot_x0 = val_cx - total_w // 2
+        for di in range(8):
+            cx_ = dot_x0 + di * dot_spacing + dot_r
+            col = (255, 140, 0) if di < self.cfg_firefighters else (45, 42, 35)
+            pygame.draw.circle(self.screen, col,          (cx_, dot_y), dot_r)
+            pygame.draw.circle(self.screen, (80, 70, 50), (cx_, dot_y), dot_r, 1)
+
+        row_y += ROW_H
+        divider(row_y - 4)
+
+        # ══ Row 2 — Algorithm ════════════════════════════════════════════════
+        section_label("Pathfinding Algorithm", row_y)
+        ry     = row_y + 20
+        n_algo = len(self.ALGORITHMS)
+        gap    = 10
+        btn_w  = (PW - 80 - gap * (n_algo - 1)) // n_algo
+        btn_h  = 38
+        for ai, (alg, lbl) in enumerate(zip(self.ALGORITHMS, self.ALGO_LABELS)):
+            bx = COL_L + ai * (btn_w + gap)
+            pill_btn(lbl, bx, ry, btn_w, btn_h,
+                     active=(self.cfg_algorithm == alg),
+                     name=f'algo_{alg}')
+            # Small description below
+            descs = {'astar':'Optimal + fast','bfs':'Shortest path',
+                     'dijkstra':'Weighted cost','dstar_lite':'Dynamic replan'}
+            desc = F_TINY().render(descs.get(alg,''), True, (90, 85, 65))
+            self.screen.blit(desc, (bx + (btn_w - desc.get_width()) // 2, ry + btn_h + 4))
+
+        row_y += ROW_H
+        divider(row_y - 4)
+
+        # ══ Row 3 — Max Steps ════════════════════════════════════════════════
+        section_label("Max Steps", row_y)
+        ry       = row_y + 18
+        val_surf = F_LARGE().render(str(self.cfg_steps), True, (255, 200, 60))
+        self.screen.blit(val_surf, (val_cx - val_surf.get_width() // 2, ry))
+        pm_btn("−", val_cx - 80 - btn_sz, ry + 2, btn_sz, 'steps_minus')
+        pm_btn("+", val_cx + 80,           ry + 2, btn_sz, 'steps_plus')
+
+        # Step range hint
+        hint = F_TINY().render("50 – 1000  (increments of 50)", True, (80, 75, 55))
+        self.screen.blit(hint, (val_cx - hint.get_width() // 2, ry + 38))
+
+        row_y += ROW_H
+        divider(row_y - 4)
+
+        # ══ Row 4 — Seed ════════════════════════════════════════════════════
+        section_label("Random Seed", row_y)
+        ry = row_y + 18
+
+        # Toggle button
+        tog_label = "FIXED SEED" if self.cfg_use_seed else "RANDOM"
+        tog_col   = (50, 180, 100) if not self.cfg_use_seed else (200, 140, 30)
+        pill_btn(tog_label, COL_L, ry, 120, 32,
+                 active=True, name='seed_toggle', accent=tog_col)
+
+        if self.cfg_use_seed:
+            val_surf = F_LARGE().render(str(self.cfg_seed_val), True, (255, 200, 60))
+            self.screen.blit(val_surf, (val_cx - val_surf.get_width() // 2, ry))
+            pm_btn("−", val_cx - 80 - btn_sz, ry + 2, btn_sz, 'seed_minus')
+            pm_btn("+", val_cx + 80,           ry + 2, btn_sz, 'seed_plus')
+        else:
+            note = F_SMALL().render("Each run will be unique", True, (100, 130, 100))
+            self.screen.blit(note, (COL_L + 136, ry + 7))
+
+        row_y += ROW_H
+
+        # ══ Deploy button ════════════════════════════════════════════════════
+        dbw, dbh = 320, 52
+        dbx = PX + (PW - dbw) // 2
+        dby = PY + PH - dbh - 20
+        drect = pygame.Rect(dbx, dby, dbw, dbh)
+        self._btn_rects['deploy'] = drect
+        hov = (self._hovered_btn == 'deploy')
+        bg  = (230, 100, 20) if hov else (190, 75, 10)
+        pygame.draw.rect(self.screen, bg,            drect, border_radius=10)
+        pygame.draw.rect(self.screen, (255, 180, 60), drect, 2, border_radius=10)
+        d_txt = F_LARGE().render("🚒  DEPLOY", True, (255, 240, 210))
+        self.screen.blit(d_txt, (dbx + (dbw - d_txt.get_width()) // 2,
+                                  dby + (dbh - d_txt.get_height()) // 2))
+
+        # ── Keyboard hint ─────────────────────────────────────────────────────
+        hint2 = F_TINY().render("ENTER / SPACE to deploy    ESC to quit",
+                                 True, (70, 65, 50))
+        self.screen.blit(hint2, (PX + (PW - hint2.get_width()) // 2, dby - 18))
+
+        pygame.display.flip()
+
     # ── Panel ─────────────────────────────────────────────────────────────────
 
     def _draw_panel(self):
@@ -405,7 +652,10 @@ class FiretruckPhase(BaseCityPhase):
     # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self):
-        """Returns (city_data, burning_road_pos) or None on quit."""
+        """
+        Returns (city_data, burning_road_pos, config) or None on quit.
+        config = dict with keys: num_firefighters, algorithm, max_steps, seed
+        """
         prev = pygame.time.get_ticks()
         while True:
             now  = pygame.time.get_ticks()
@@ -419,6 +669,12 @@ class FiretruckPhase(BaseCityPhase):
             self.draw()
 
             if self.state == 'done':
-                return self.city_data, self.burning_road_pos
+                config = {
+                    'num_firefighters': self.cfg_firefighters,
+                    'algorithm':        self.cfg_algorithm,
+                    'max_steps':        self.cfg_steps,
+                    'seed':             self.cfg_seed_val if self.cfg_use_seed else None,
+                }
+                return self.city_data, self.burning_road_pos, config
 
             self.clock.tick(60)
