@@ -26,8 +26,8 @@ _V_NAMES = ["1st Ave","2nd Ave","3rd Ave","4th Ave","5th Ave",
             "6th Ave","7th Ave","8th Ave","9th Ave","10th Ave"]
 
 # Traffic-light timing constants (frames at 60 FPS)
-TL_CYCLE  = 360   # total frames per full cycle
-TL_GREEN  = 180   # frames spent green; red = TL_CYCLE - TL_GREEN = 30
+TL_CYCLE  = 60  # total frames per full cycle
+TL_GREEN  = 30   # frames spent green; red = TL_CYCLE - TL_GREEN = 30
 
 
 # ── Connectivity check (inline BFS — avoids circular imports) ─────────────────

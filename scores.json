@@ -18,6 +18,15 @@
     "date": "2026-04-19 17:14"
   },
   {
+    "score": 1702.5,
+    "rescued": 20,
+    "total": 20,
+    "steps": 137,
+    "algorithm": "DSTAR_LITE",
+    "floors": 3,
+    "date": "2026-04-20 00:25"
+  },
+  {
     "score": 1690.1,
     "rescued": 20,
     "total": 21,
@@ -79,14 +88,5 @@
     "algorithm": "DSTAR_LITE",
     "floors": 3,
     "date": "2026-04-19 17:23"
-  },
-  {
-    "score": 1602.3,
-    "rescued": 21,
-    "total": 23,
-    "steps": 117,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-20 15:16"
   }
 ]
