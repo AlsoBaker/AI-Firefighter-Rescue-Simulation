@@ -182,16 +182,43 @@ class PygameSimulation:
                 elif k == pygame.K_2 and NUM_FLOORS > 1: self.active_floor = 1
                 elif k == pygame.K_3 and NUM_FLOORS > 2: self.active_floor = 2
             if event.type == pygame.MOUSEBUTTONDOWN:
-                self._handle_click(event.pos)
+                self._handle_click(event.pos, event.button)
         return True
 
-    def _handle_click(self, pos):
+    def _handle_click(self, pos, button=1):
+        # ── Floor tab switching (any button) ──────────────────────────────
         tab_w, tab_gap = 100, 8
         for i in range(NUM_FLOORS):
             tx = GRID_X + i * (tab_w + tab_gap)
             ty = MARGIN
             if tx <= pos[0] <= tx + tab_w and ty <= pos[1] <= ty + TAB_H - 4:
                 self.active_floor = i
+                return
+
+        # ── Fire placement / removal (only when paused) ───────────────────
+        if not self.paused:
+            return
+        if self.show_end_screen:
+            return
+
+        # Convert pixel to grid cell
+        mx, my = pos
+        c = (mx - GRID_X) // CELL_SIZE
+        r = (my - GRID_Y) // CELL_SIZE
+
+        # Bounds check — must be inside the grid
+        if not (0 <= r < ROWS and 0 <= c < COLS):
+            return
+
+        grid = self.grids[self.active_floor]
+        cell = int(grid[r, c])
+
+        if button == 1:                       # Left click — place fire
+            if cell == EMPTY:
+                grid[r, c] = FIRE
+        elif button == 3:                     # Right click — remove fire
+            if cell == FIRE:
+                grid[r, c] = EMPTY
 
     # ----------------------------------------------------------
     # Update
@@ -469,7 +496,7 @@ class PygameSimulation:
             y += 17
 
         y += 8
-        for line in ["SPACE  Pause/resume","UP/DN  Speed","1 2 3  Floor","R  Reset","ESC  Quit"]:
+        for line in ["SPACE  Pause/resume","UP/DN  Speed","1 2 3  Floor","R  Reset","ESC  Quit","","LClick  Place fire*","RClick  Remove fire*","*paused only"]:
             self._draw_text(line, F_TINY, C_TEXT_DIM, 14, y); y += 15
 
         if self.end_reason:
@@ -610,6 +637,10 @@ class PygameSimulation:
     # ----------------------------------------------------------
 
     def run(self):
+        # Flush any stale events from previous phases (e.g. the R keypress
+        # from the ambulance phase, or display events from window recreation).
+        # Without this, the sim can exit on its very first frame.
+        pygame.event.clear()
         running = True
         while running:
             result = self.handle_events()
@@ -631,18 +662,25 @@ class PygameSimulation:
 
 # ============================================================
 
-def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar"):
+def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar",
+                   city_data=None, burning_road_pos=None):
     from environment import create_all_floors
     while True:
-        sim    = PygameSimulation(grids, num_firefighters, max_steps,
-                                  algorithm)
+        sim    = PygameSimulation(grids, num_firefighters, max_steps, algorithm)
         result = sim.run()
         if result == 'reset':
             grids = create_all_floors()
         elif isinstance(result, tuple) and result[0] == 'ambulance':
             rescued = result[1]
-            AmbulancePhase(rescued_count=rescued).run()
+            amb_result = AmbulancePhase(rescued_count=rescued,
+                                        city_data=city_data,
+                                        start_pos=burning_road_pos).run()
+            if amb_result == 'restart':
+                # Keep pygame alive — FiretruckPhase reinits the display.
+                # Calling pygame.quit() here would invalidate module-level
+                # fonts in city_phase_base.py, causing a crash on restart.
+                return 'restart'
             pygame.quit()
-            return result[1]   # exit simulation entirely after ambulance
+            return result[1]
         else:
             return result

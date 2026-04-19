@@ -1,5 +1,41 @@
 [
   {
+    "score": 1718.5,
+    "rescued": 21,
+    "total": 21,
+    "steps": 104,
+    "algorithm": "DSTAR_LITE",
+    "floors": 3,
+    "date": "2026-04-19 13:10"
+  },
+  {
+    "score": 1705.6,
+    "rescued": 20,
+    "total": 21,
+    "steps": 111,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-04-19 17:14"
+  },
+  {
+    "score": 1690.1,
+    "rescued": 20,
+    "total": 21,
+    "steps": 86,
+    "algorithm": "DSTAR_LITE",
+    "floors": 3,
+    "date": "2026-04-19 12:44"
+  },
+  {
+    "score": 1644.5,
+    "rescued": 19,
+    "total": 21,
+    "steps": 97,
+    "algorithm": "ASTAR",
+    "floors": 3,
+    "date": "2026-04-19 17:09"
+  },
+  {
     "score": 1644.3,
     "rescued": 20,
     "total": 22,
@@ -16,6 +52,15 @@
     "algorithm": "ASTAR",
     "floors": 3,
     "date": "2026-03-20 14:59"
+  },
+  {
+    "score": 1607.7,
+    "rescued": 22,
+    "total": 24,
+    "steps": 132,
+    "algorithm": "BFS",
+    "floors": 3,
+    "date": "2026-04-09 00:20"
   },
   {
     "score": 1602.3,
@@ -43,50 +88,5 @@
     "algorithm": "ASTAR",
     "floors": 3,
     "date": "2026-03-28 19:48"
-  },
-  {
-    "score": 1583.8,
-    "rescued": 21,
-    "total": 24,
-    "steps": 121,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-28 19:35"
-  },
-  {
-    "score": 1564.3,
-    "rescued": 20,
-    "total": 22,
-    "steps": 152,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-20 14:51"
-  },
-  {
-    "score": 1559.5,
-    "rescued": 19,
-    "total": 21,
-    "steps": 136,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-20 15:27"
-  },
-  {
-    "score": 1557.6,
-    "rescued": 20,
-    "total": 21,
-    "steps": 147,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-29 00:05"
-  },
-  {
-    "score": 1555.4,
-    "rescued": 18,
-    "total": 21,
-    "steps": 108,
-    "algorithm": "ASTAR",
-    "floors": 3,
-    "date": "2026-03-29 23:26"
   }
 ]

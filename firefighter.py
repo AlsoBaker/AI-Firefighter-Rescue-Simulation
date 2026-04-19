@@ -16,6 +16,11 @@ class Firefighter:
         self.under_cell      = EMPTY
         self.people_rescued  = 0
         self.stuck_counter   = 0
+        # Targets where pathfinding returned [] — skipped until fire clears.
+        # Cleared every FAILED_TARGET_RESET steps so targets become retryable
+        # once fire spreads away or the grid otherwise changes.
+        self.failed_targets      = set()
+        self._failed_reset_timer = 0
 
     def is_alive(self):
         return self.hp > 0
@@ -103,10 +108,19 @@ class FirefighterManager:
     # Targeting
     # ----------------------------------------------------------
 
-    def _find_person_target(self, grid, start_pos, claimed):
-        danger = [tuple(p) for p in np.argwhere(grid == PERSON_DANGER) if tuple(p) not in claimed]
-        safe   = [tuple(p) for p in np.argwhere(grid == PERSON)        if tuple(p) not in claimed]
+    def _find_person_target(self, grid, start_pos, claimed, failed=None):
+        failed = failed or set()
+        danger = [tuple(p) for p in np.argwhere(grid == PERSON_DANGER)
+                  if tuple(p) not in claimed and tuple(p) not in failed]
+        safe   = [tuple(p) for p in np.argwhere(grid == PERSON)
+                  if tuple(p) not in claimed and tuple(p) not in failed]
         targets = danger if danger else safe
+        if not targets:
+            # If all reachable targets are in failed, fall back to ANY target
+            # (at least give the FF something to retry)
+            danger2 = [tuple(p) for p in np.argwhere(grid == PERSON_DANGER) if tuple(p) not in claimed]
+            safe2   = [tuple(p) for p in np.argwhere(grid == PERSON)        if tuple(p) not in claimed]
+            targets = danger2 if danger2 else safe2
         if not targets:
             return None
         return min(targets, key=lambda t: abs(start_pos[0]-t[0]) + abs(start_pos[1]-t[1]))
@@ -159,9 +173,16 @@ class FirefighterManager:
 
             ff.recalculate_if_blocked(grid)
 
+            # Periodically retry failed targets (fire may have changed)
+            ff._failed_reset_timer += 1
+            if ff._failed_reset_timer >= 12:
+                ff.failed_targets.clear()
+                ff._failed_reset_timer = 0
+
             # ---- DECIDE GOAL ----
             if not ff.carrying_person:
-                target = self._find_person_target(grid, ff.pos, floor_claimed)
+                target = self._find_person_target(
+                    grid, ff.pos, floor_claimed, failed=ff.failed_targets)
 
                 if target is None and self.floor_manager:
                     best_floor, count = self.floor_manager.best_floor_to_visit(floor_idx)
@@ -176,6 +197,12 @@ class FirefighterManager:
                 floor_claimed.add(target)
                 if not ff.current_path:
                     ff.current_path = self.find_path(grid, ff.pos, target, water=ff.water)
+                    # If pathfinding failed, mark this target so we skip it next
+                    # tick instead of retrying the same unreachable cell forever.
+                    if not ff.current_path:
+                        ff.failed_targets.add(target)
+                        grids[floor_idx][ff.pos] = FIREFIGHTER
+                        continue
 
             else:
                 target = self._find_hospital(grid, ff.pos)
@@ -241,6 +268,7 @@ class FirefighterManager:
             ff.under_cell = dest_cell
             ff.pos        = next_pos
             grids[floor_idx][nr, nc] = FIREFIGHTER
+            ff.failed_targets.clear()   # successfully moved — reset failure memory
 
             # Extinguish adjacent fire after moving
             self._total_extinguished += self._extinguish_adjacent(ff, grids[floor_idx])

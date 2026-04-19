@@ -82,18 +82,34 @@ class FloorManager:
 
     def best_floor_to_visit(self, current_floor):
         """
-        Return (floor_idx, count) of the floor (excluding current)
-        with the most people, weighted by danger.
+        Return (floor_idx, score) of the best floor to visit next.
+
+        Preference order:
+          1. Adjacent floor (|distance| == 1) with people — pick highest score.
+          2. Non-adjacent floor — only if NO adjacent floor has people at all.
+
+        This prevents firefighters on floor 1 from bypassing floor 2 entirely
+        just because floor 3 has a marginally higher danger score.
         Returns (None, 0) if no other floor has people.
         """
-        best_floor, best_score = None, 0
+        adjacent, non_adjacent = [], []
         for f in range(self.num_floors):
             if f == current_floor:
                 continue
             score = self.danger_count(f) * 2 + self.people_count(f)
-            if score > best_score:
-                best_score = score
-                best_floor = f
+            if score <= 0:
+                continue
+            if abs(f - current_floor) == 1:
+                adjacent.append((score, f))
+            else:
+                non_adjacent.append((score, f))
+
+        # Prefer adjacent floors; fall back to non-adjacent only when adjacent
+        # floors are empty of people.
+        pool = adjacent if adjacent else non_adjacent
+        if not pool:
+            return None, 0
+        best_score, best_floor = max(pool)
         return best_floor, best_score
 
     def staircase_toward(self, current_floor, target_floor):

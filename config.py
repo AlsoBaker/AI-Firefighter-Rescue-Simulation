@@ -15,7 +15,7 @@ STAIRCASE   = 7
 HOSPITAL    = 8
 
 # --- HP ---
-CIVILIAN_MAX_HP = 15   # was 10
+CIVILIAN_MAX_HP = 20   # was 15
 FF_MAX_HP       = 35   # was 25
 
 # --- Water ---
