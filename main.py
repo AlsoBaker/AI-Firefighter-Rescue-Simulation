@@ -11,7 +11,7 @@ from firetruck import FiretruckPhase
 
 
 def main():
-    num_firefighters = 4
+    num_firefighters = 1
     max_steps        = 300
     algorithm        = "astar"
     seed             = None
@@ -95,6 +95,7 @@ def main():
         run_algo  = cfg.get('algorithm',        algorithm)
         run_steps = cfg.get('max_steps',        max_steps)
         run_seed  = cfg.get('seed',             seed)
+        run_mode  = cfg.get('tick_mode',        'continuous')
         if run_seed is not None:
             np.random.seed(run_seed)
 
@@ -107,6 +108,7 @@ def main():
             algorithm        = run_algo,
             city_data        = city_data,
             burning_road_pos = burning_road_pos,
+            tick_mode        = run_mode,
         )
 
         if result == 'restart':

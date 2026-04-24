@@ -33,7 +33,7 @@ class FiretruckPhase(BaseCityPhase):
     CUTSCENE_DURATION = 3.5
 
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.FULLSCREEN)
+        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
         pygame.display.set_caption("Emergency Dispatch — Click a building to report a fire")
         self.clock  = pygame.time.Clock()
         self._reset()
@@ -84,6 +84,7 @@ class FiretruckPhase(BaseCityPhase):
         self.cfg_seed         = None       # None = random
         self.cfg_use_seed     = False
         self.cfg_seed_val     = 42         # value shown when seed is enabled
+        self.cfg_tick_mode    = 'tick'   # 'tick' (discrete) or 'continuous' (smooth glide)
         self._btn_rects       = {}         # populated by _draw_config, read by handle_events
         self._hovered_btn     = None
 
@@ -410,6 +411,8 @@ class FiretruckPhase(BaseCityPhase):
                 self.cfg_seed_val = max(0, self.cfg_seed_val - 1)
             elif name == 'seed_plus':
                 self.cfg_seed_val += 1
+            elif name.startswith('mode_'):
+                self.cfg_tick_mode = name[5:]   # 'continuous' or 'tick'
             elif name == 'deploy':
                 self.state = 'done'
             break
@@ -579,25 +582,33 @@ class FiretruckPhase(BaseCityPhase):
             self.screen.blit(note, (COL_L + 136, ry + 7))
 
         row_y += ROW_H
+        divider(row_y - 4)
 
-        # ══ Deploy button ════════════════════════════════════════════════════
-        dbw, dbh = 320, 52
-        dbx = PX + (PW - dbw) // 2
-        dby = PY + PH - dbh - 20
-        drect = pygame.Rect(dbx, dby, dbw, dbh)
-        self._btn_rects['deploy'] = drect
-        hov = (self._hovered_btn == 'deploy')
-        bg  = (230, 100, 20) if hov else (190, 75, 10)
-        pygame.draw.rect(self.screen, bg,            drect, border_radius=10)
-        pygame.draw.rect(self.screen, (255, 180, 60), drect, 2, border_radius=10)
-        d_txt = F_LARGE().render("🚒  DEPLOY", True, (255, 240, 210))
-        self.screen.blit(d_txt, (dbx + (dbw - d_txt.get_width()) // 2,
-                                  dby + (dbh - d_txt.get_height()) // 2))
+        # ══ Row 5 — Movement Mode ════════════════════════════════════════════
+        section_label("Movement Mode", row_y)
+        ry   = row_y + 20
+        mw   = (PW - 80 - gap) // 2   # two equal buttons
+        mh   = 38
 
-        # ── Keyboard hint ─────────────────────────────────────────────────────
-        hint2 = F_TINY().render("ENTER / SPACE to deploy    ESC to quit",
+        modes = [
+            ('tick',       'TICK-BY-TICK', 'Discrete steps (default)'),
+            ('continuous', 'CONTINUOUS',   'Smooth glide like ambulance'),
+        ]
+        for mi, (mode_key, mode_lbl, mode_desc) in enumerate(modes):
+            bx = COL_L + mi * (mw + gap)
+            pill_btn(mode_lbl, bx, ry, mw, mh,
+                     active=(self.cfg_tick_mode == mode_key),
+                     name=f'mode_{mode_key}')
+            desc = F_TINY().render(mode_desc, True, (90, 85, 65))
+            self.screen.blit(desc, (bx + (mw - desc.get_width()) // 2, ry + mh + 4))
+
+        row_y += ROW_H
+
+        # ── Keyboard hint at bottom of panel ─────────────────────────────────
+        hint2 = F_TINY().render("ENTER / SPACE to deploy          ESC to quit",
                                  True, (70, 65, 50))
-        self.screen.blit(hint2, (PX + (PW - hint2.get_width()) // 2, dby - 18))
+        self.screen.blit(hint2, (PX + (PW - hint2.get_width()) // 2,
+                                  PY + PH - 22))
 
         pygame.display.flip()
 
@@ -674,6 +685,7 @@ class FiretruckPhase(BaseCityPhase):
                     'algorithm':        self.cfg_algorithm,
                     'max_steps':        self.cfg_steps,
                     'seed':             self.cfg_seed_val if self.cfg_use_seed else None,
+                    'tick_mode':        self.cfg_tick_mode,
                 }
                 return self.city_data, self.burning_road_pos, config
 

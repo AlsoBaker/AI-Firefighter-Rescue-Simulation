@@ -69,27 +69,50 @@ class SimulationMetrics:
         else:
             self.current_phase = 'recovery'
 
-    def calculate_score(self, total_people):
-        """Score out of 2000."""
+    def calculate_score(self, total_people, max_steps=300):
+        """
+        Score out of 2000.
+
+        Components
+        ──────────
+        base             (0–900)  rescue_ratio × 900
+        casualty_bonus   (0–200)  (1 - burn_ratio) × 200
+        speed_bonus      (0–400)  relative to YOUR configured step budget
+        fire_bonus       (0–300)  average fire cells over time, not peak
+        extinguish_bonus (0–100)  min(100, fires_extinguished × 2)
+        penalty          (0–200)  burn_ratio × 200  subtracted for burns
+        """
         if total_people == 0:
-            return 2000
+            return 2000.0
+
         rescue_ratio = self.people_rescued / total_people
-        base_score   = rescue_ratio * 1000
+        burn_ratio   = min(1.0, self.people_burned / total_people)
 
-        efficiency   = max(0.0, 1.0 - (self.steps / 500))
-        speed_bonus  = efficiency * 500
+        # Base: how many civilians were saved
+        base = rescue_ratio * 900
 
-        grid_size    = ROWS * COLS * NUM_FLOORS
-        fire_ratio   = self.max_fire_spread / grid_size
-        # fire_bonus: reward for keeping fire small
-        fire_bonus   = max(0.0, (1.0 - fire_ratio) * 300)
+        # Casualty bonus: reward for zero burns
+        casualty_bonus = (1.0 - burn_ratio) * 200
 
-        danger_bonus = 100
+        # Speed bonus: relative to the configured step budget
+        efficiency   = max(0.0, 1.0 - (self.steps / max(1, max_steps)))
+        speed_bonus  = efficiency * 400
 
-        total = base_score + speed_bonus + fire_bonus + danger_bonus
+        # Fire bonus: average fire cell count (not peak — peak is luck-dependent)
+        grid_size = ROWS * COLS * NUM_FLOORS
+        avg_fire  = float(np.mean(self.fire_history)) if self.fire_history else 0.0
+        fire_bonus = max(0.0, (1.0 - avg_fire / grid_size) * 300)
+
+        # Extinguish bonus: reward active firefighting
+        extinguish_bonus = min(100.0, self.fires_extinguished * 2.0)
+
+        # Casualty penalty: cost for every civilian lost
+        penalty = burn_ratio * 200
+
+        total = base + casualty_bonus + speed_bonus + fire_bonus + extinguish_bonus - penalty
         return min(2000.0, max(0.0, total))
 
-    def get_summary(self, total_people, firefighter_stats):
+    def get_summary(self, total_people, firefighter_stats, max_steps=300):
         return {
             'total_steps':       self.steps,
             'people_rescued':    self.people_rescued,
@@ -100,13 +123,13 @@ class SimulationMetrics:
             'fires_extinguished': self.fires_extinguished,
             'avg_people_in_danger': (np.mean(self.people_danger_history)
                                      if self.people_danger_history else 0),
-            'final_score':       self.calculate_score(total_people),
+            'final_score':       self.calculate_score(total_people, max_steps),
             'firefighter_stats': firefighter_stats,
             'phase':             self.current_phase,
         }
 
-    def print_report(self, total_people, firefighter_stats):
-        s = self.get_summary(total_people, firefighter_stats)
+    def print_report(self, total_people, firefighter_stats, max_steps=300):
+        s = self.get_summary(total_people, firefighter_stats, max_steps)
         print("\n" + "="*60)
         print("SIMULATION FINAL REPORT")
         print("="*60)

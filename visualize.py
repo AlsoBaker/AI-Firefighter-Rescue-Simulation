@@ -136,12 +136,16 @@ class SmokeParticle:
 
 class PygameSimulation:
 
-    def __init__(self, grids, num_firefighters=1, max_steps=300, algorithm="astar"):
+    def __init__(self, grids, num_firefighters=1, max_steps=300, algorithm="astar",
+                 tick_mode="continuous"):
 
         self.grids            = grids
         self.num_firefighters = num_firefighters
         self.max_steps        = max_steps
         self.algorithm        = algorithm
+        # Movement mode: 'continuous' or 'tick'
+        # tick mode uses a slow default speed so each step is clearly visible.
+        self.tick_mode        = tick_mode
 
         self.floor_manager = FloorManager(grids)
         self.health        = HealthSystem()
@@ -162,6 +166,7 @@ class PygameSimulation:
 
         self.step              = 0
         self.paused            = False
+        # Both modes start at 1.0x; continuous feels faster due to smooth glide
         self.speed             = 1.0
         self.simulation_active = True
         self.end_reason        = ""
@@ -174,9 +179,13 @@ class PygameSimulation:
         self.smoke_particles = []
         self.anim_frame      = 0
         self.show_paths      = False   # V key toggles path visualisation
+        # Continuous mode: per-FF interpolation state
+        # {ff_id: {'from': (px,py), 'to': (px,py), 'progress': float}}
+        self._ff_interp      = {}
+        self._interp_speed   = 4.0    # cells per second at 60fps
 
         self.screen = pygame.display.set_mode(
-            (SCREEN_W, SCREEN_H), pygame.FULLSCREEN
+            (SCREEN_W, SCREEN_H)
         )
         pygame.display.set_caption("AI Firefighter Rescue Simulation")
         self.clock = pygame.time.Clock()
@@ -209,6 +218,12 @@ class PygameSimulation:
                 elif k == pygame.K_r:       return 'reset'
                 elif k == pygame.K_a and self.show_end_screen: return 'ambulance'
                 elif k == pygame.K_v:       self.show_paths = not self.show_paths
+                elif k == pygame.K_m:
+                    if self.tick_mode == "continuous":
+                        self.tick_mode = "tick"
+                    else:
+                        self.tick_mode = "continuous"
+                        self._ff_interp = {}   # clear stale interp on switch
                 elif k == pygame.K_1:       self.active_floor = 0
                 elif k == pygame.K_2 and NUM_FLOORS > 1: self.active_floor = 1
                 elif k == pygame.K_3 and NUM_FLOORS > 2: self.active_floor = 2
@@ -262,11 +277,22 @@ class PygameSimulation:
             self.anim_frame += 1
             return
 
-        if self.anim_frame % max(1, int(10 / self.speed)) != 0:
+        # In continuous mode, advance interpolations every frame and only
+        # fire the next sim tick when all FFs have finished their glide.
+        if self.tick_mode == "continuous":
+            all_done = self._advance_interp()
             self.fire_particles  = [p for p in self.fire_particles  if p.update()]
             self.smoke_particles = [p for p in self.smoke_particles if p.update()]
             self.anim_frame += 1
-            return
+            if not all_done:
+                return   # still animating — don't fire next tick yet
+        else:
+            # Tick-by-tick: original frame-throttle behaviour
+            if self.anim_frame % max(1, int(10 / self.speed)) != 0:
+                self.fire_particles  = [p for p in self.fire_particles  if p.update()]
+                self.smoke_particles = [p for p in self.smoke_particles if p.update()]
+                self.anim_frame += 1
+                return
 
         self.step += 1
 
@@ -283,7 +309,28 @@ class PygameSimulation:
             if self.ff_manager:
                 self.health.tick_ff_damage(self.ff_manager.firefighters, self.grids)
 
+        # Snapshot positions BEFORE move for interpolation start points
+        if self.tick_mode == "continuous" and self.ff_manager:
+            pre_pos = {id(ff): (GRID_X + ff.pos[1]*CELL_SIZE,
+                                GRID_Y + ff.pos[0]*CELL_SIZE)
+                       for ff in self.ff_manager.firefighters}
+        else:
+            pre_pos = {}
+
         self.grids = move_firefighter(self.grids)
+
+        # Record interpolation from old pixel → new pixel for each FF
+        if self.tick_mode == "continuous" and self.ff_manager:
+            self._ff_interp = {}
+            for ff in self.ff_manager.firefighters:
+                fid   = id(ff)
+                start = pre_pos.get(fid, (GRID_X + ff.pos[1]*CELL_SIZE,
+                                          GRID_Y + ff.pos[0]*CELL_SIZE))
+                end   = (GRID_X + ff.pos[1]*CELL_SIZE,
+                         GRID_Y + ff.pos[0]*CELL_SIZE)
+                # Only interpolate if the FF actually moved
+                prog  = 0.0 if start != end else 1.0
+                self._ff_interp[fid] = {'from': start, 'to': end, 'progress': prog}
 
         ff_stats = get_firefighter_stats()
         stats    = self.metrics.update(self.grids, ff_stats)
@@ -317,7 +364,7 @@ class PygameSimulation:
         carried  = ff_stats.get('carrying', 0)
         rescued  = ff_stats.get('rescued', 0) + carried
         self.metrics.people_rescued = rescued
-        score    = self.metrics.calculate_score(self.total_people)
+        score    = self.metrics.calculate_score(self.total_people, self.max_steps)
         self.leaderboard_rank = save_score(
             score, rescued, self.total_people,
             self.step, self.algorithm, NUM_FLOORS
@@ -461,28 +508,35 @@ class PygameSimulation:
                     if self.img_danger:
                         self.screen.blit(self.img_danger, (x, y))
 
-                # ── Firefighter (warm gold background) ────────────────────────
+                # ── Firefighter ───────────────────────────────────────────────
                 elif cell == FIREFIGHTER:
-                    pygame.draw.rect(self.screen, (65, 48, 10), (x, y, cs, cs))
-                    pygame.draw.rect(self.screen, (180, 130, 30),
-                                     (x, y, cs, cs), 1)
-                    if self.img_ff:
-                        self.screen.blit(self.img_ff, (x, y))
-                    # ── Carrying indicator: small civilian badge top-right ────
-                    if self.ff_manager:
-                        for ff in self.ff_manager.firefighters:
-                            if ff.pos == (r, c) and ff.current_floor == self.active_floor:
-                                if ff.carrying_person and self.img_civilian:
-                                    icon_sz = max(10, cs // 3)
-                                    icon    = pygame.transform.smoothscale(
-                                                self.img_civilian, (icon_sz, icon_sz))
-                                    pygame.draw.rect(self.screen, (230, 230, 230),
-                                                     (x + cs - icon_sz - 1,
-                                                      y + 1, icon_sz, icon_sz),
-                                                     border_radius=2)
-                                    self.screen.blit(icon,
-                                                     (x + cs - icon_sz - 1, y + 1))
-                                break
+                    if self.tick_mode == "continuous":
+                        # Draw floor tile only — sprite drawn in Pass 5 at interpolated pos
+                        pygame.draw.rect(self.screen, floor_tile, (x, y, cs, cs))
+                        gc = (floor_tile[0]+8, floor_tile[1]+8, floor_tile[2]+8)
+                        pygame.draw.line(self.screen, gc, (x, y), (x+cs-1, y), 1)
+                        pygame.draw.line(self.screen, gc, (x, y), (x, y+cs-1), 1)
+                    else:
+                        pygame.draw.rect(self.screen, (65, 48, 10), (x, y, cs, cs))
+                        pygame.draw.rect(self.screen, (180, 130, 30),
+                                         (x, y, cs, cs), 1)
+                        if self.img_ff:
+                            self.screen.blit(self.img_ff, (x, y))
+                        # Carrying indicator (tick mode only — drawn in Pass 5 for continuous)
+                        if self.ff_manager:
+                            for ff in self.ff_manager.firefighters:
+                                if ff.pos == (r, c) and ff.current_floor == self.active_floor:
+                                    if ff.carrying_person and self.img_civilian:
+                                        icon_sz = max(10, cs // 3)
+                                        icon    = pygame.transform.smoothscale(
+                                                    self.img_civilian, (icon_sz, icon_sz))
+                                        pygame.draw.rect(self.screen, (230, 230, 230),
+                                                         (x + cs - icon_sz - 1,
+                                                          y + 1, icon_sz, icon_sz),
+                                                         border_radius=2)
+                                        self.screen.blit(icon,
+                                                         (x + cs - icon_sz - 1, y + 1))
+                                    break
 
                 else:
                     pygame.draw.rect(self.screen, floor_tile, (x, y, cs, cs))
@@ -495,8 +549,8 @@ class PygameSimulation:
                     hp = self.health.get(self.active_floor, r, c)
                     self._draw_hp_bar(x, y, hp, CIVILIAN_MAX_HP)
 
-                # HP + water bars for firefighters
-                elif cell == FIREFIGHTER and self.ff_manager:
+                # HP + water bars for firefighters (tick mode — continuous drawn in Pass 5)
+                elif cell == FIREFIGHTER and self.ff_manager and self.tick_mode != "continuous":
                     for ff in self.ff_manager.firefighters:
                         if ff.pos == (r, c) and ff.current_floor == self.active_floor:
                             self._draw_hp_bar(x, y, ff.hp, FF_MAX_HP, has_water_bar=True)
@@ -569,6 +623,33 @@ class PygameSimulation:
                     surf  = pygame.Surface((dot_r*2+2, dot_r*2+2), pygame.SRCALPHA)
                     pygame.draw.circle(surf, (*col, alpha), (dot_r+1, dot_r+1), dot_r)
                     self.screen.blit(surf, (px - dot_r - 1, py - dot_r - 1))
+
+        # ── Pass 5: continuous-mode FF sprites at interpolated positions ────
+        if self.tick_mode == "continuous" and self.ff_manager:
+            for ff in self.ff_manager.firefighters:
+                if ff.current_floor != self.active_floor:
+                    continue
+                px, py = self._get_ff_pixel(ff)
+                # Gold background at interpolated position
+                pygame.draw.rect(self.screen, (65, 48, 10),
+                                 (px, py, cs, cs))
+                pygame.draw.rect(self.screen, (180, 130, 30),
+                                 (px, py, cs, cs), 1)
+                if self.img_ff:
+                    self.screen.blit(self.img_ff, (px, py))
+                # Carrying indicator
+                if ff.carrying_person and self.img_civilian:
+                    icon_sz = max(10, cs // 3)
+                    icon    = pygame.transform.smoothscale(
+                                self.img_civilian, (icon_sz, icon_sz))
+                    pygame.draw.rect(self.screen, (230, 230, 230),
+                                     (px + cs - icon_sz - 1,
+                                      py + 1, icon_sz, icon_sz),
+                                     border_radius=2)
+                    self.screen.blit(icon, (px + cs - icon_sz - 1, py + 1))
+                # HP + water bars
+                self._draw_hp_bar(px, py, ff.hp, FF_MAX_HP, has_water_bar=True)
+                self._draw_water_bar(px, py, ff.water)
 
         # ── Room frame ───────────────────────────────────────────────────────
         # Thick outer border to suggest building walls
@@ -670,12 +751,55 @@ class PygameSimulation:
 
         y += 8
         path_state = "ON" if self.show_paths else "OFF"
-        for line in ["SPACE  Pause/resume","UP/DN  Speed","1 2 3  Floor",f"V      Paths [{path_state}]","R  Reset","ESC  Quit","","LClick  Place fire*","RClick  Remove fire*","*paused only"]:
+        mode_label = "TICK" if self.tick_mode == "tick" else "CONT"
+        for line in ["SPACE  Pause/resume","UP/DN  Speed","1 2 3  Floor",
+                     f"V      Paths [{path_state}]",
+                     f"M      Mode  [{mode_label}]",
+                     "R  Reset","ESC  Quit","",
+                     "LClick  Place fire*","RClick  Remove fire*","*paused only"]:
             self._draw_text(line, F_TINY, C_TEXT_DIM, 14, y); y += 15
 
         if self.end_reason:
             msg = F_SMALL.render(self.end_reason, True, C_GOLD)
             self.screen.blit(msg, (14, SCREEN_H - 36))
+
+    # ----------------------------------------------------------
+    # Continuous mode interpolation
+    # ----------------------------------------------------------
+
+    def _advance_interp(self):
+        """
+        Advance all FF interpolations by one frame.
+        Returns True when every FF has finished its glide (next tick can fire).
+        Speed controls how fast the glide completes:
+          interp_speed = self.speed * 6.0  cells-per-second equivalent
+          At 60 fps, progress += speed*6/60 per frame.
+          speed=0.5 → ~20 frames per cell; speed=3.0 → ~3 frames per cell.
+        """
+        if not self._ff_interp:
+            return True
+        dt_progress = self.speed * 6.0 / 60.0
+        all_done = True
+        for fid, state in self._ff_interp.items():
+            if state['progress'] < 1.0:
+                state['progress'] = min(1.0, state['progress'] + dt_progress)
+            if state['progress'] < 1.0:
+                all_done = False
+        return all_done
+
+    def _get_ff_pixel(self, ff):
+        """Return the current draw pixel (top-left) for a FF, interpolated if in continuous mode."""
+        if self.tick_mode != "continuous":
+            return (GRID_X + ff.pos[1] * CELL_SIZE,
+                    GRID_Y + ff.pos[0] * CELL_SIZE)
+        state = self._ff_interp.get(id(ff))
+        if state is None:
+            return (GRID_X + ff.pos[1] * CELL_SIZE,
+                    GRID_Y + ff.pos[0] * CELL_SIZE)
+        t   = state['progress']
+        fx, fy = state['from']
+        tx, ty = state['to']
+        return (int(fx + (tx - fx) * t), int(fy + (ty - fy) * t))
 
     # ----------------------------------------------------------
     # Minimap — right of the grid, always visible during sim
@@ -767,7 +891,7 @@ class PygameSimulation:
         overlay.fill((10, 10, 10, 220))
         self.screen.blit(overlay, (0, 0))
 
-        score    = self.metrics.calculate_score(self.total_people)
+        score    = self.metrics.calculate_score(self.total_people, self.max_steps)
         rank_txt = f"   Rank #{self.leaderboard_rank}" if self.leaderboard_rank else ""
 
         # ── Title bar (full width, own zone) ──────────────────────────
@@ -797,14 +921,17 @@ class PygameSimulation:
         board_rows   = 11                   # header + 10 entries
         board_row_h  = 22
         board_h      = board_rows * board_row_h
-        ir_gap       = 10
+        # ir_gap must be large enough to fit the "Incident Report" section label
+        # (F_SMALL height ~18px) plus a small margin above the card.
+        ir_gap       = 28
         ir_y         = top_y + 22 + board_h + ir_gap
         ir_h         = bot_y - ir_y - 4
 
         # ── Section labels ─────────────────────────────────────────────
         self._draw_text("Performance graph", F_SMALL, C_TEXT_DIM, gx, top_y)
         self._draw_text("Top 10 scores",     F_SMALL, C_TEXT_DIM, bx, top_y)
-        self._draw_text("Incident Report",   F_SMALL, C_TEXT_DIM, bx, ir_y - 18)
+        # Label sits in the gap between leaderboard and incident report card
+        self._draw_text("Incident Report",   F_SMALL, C_TEXT_DIM, bx, ir_y - 20)
 
         graph_y = top_y + 22
 
@@ -881,7 +1008,7 @@ class PygameSimulation:
                             if self.total_people > 0 else 0)
             ff_count     = len(self.ff_manager.firefighters) if self.ff_manager else 0
             extinguished = self.metrics.fires_extinguished
-            score_val    = self.metrics.calculate_score(self.total_people)
+            score_val    = self.metrics.calculate_score(self.total_people, self.max_steps)
             rank_disp    = f"#{self.leaderboard_rank}" if self.leaderboard_rank else "—"
 
             # Two-column layout inside the card
@@ -968,17 +1095,18 @@ class PygameSimulation:
 
         pygame.quit()
         ff_stats = get_firefighter_stats()
-        self.metrics.print_report(self.total_people, ff_stats)
+        self.metrics.print_report(self.total_people, ff_stats, self.max_steps)
         return self.metrics
 
 
 # ============================================================
 
 def run_simulation(grids, num_firefighters=1, max_steps=300, algorithm="astar",
-                   city_data=None, burning_road_pos=None):
+                   city_data=None, burning_road_pos=None, tick_mode="continuous"):
     from environment import create_all_floors
     while True:
-        sim    = PygameSimulation(grids, num_firefighters, max_steps, algorithm)
+        sim    = PygameSimulation(grids, num_firefighters, max_steps, algorithm,
+                                  tick_mode=tick_mode)
         result = sim.run()
         if result == 'reset':
             grids = create_all_floors()
