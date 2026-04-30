@@ -14,9 +14,9 @@ def spread_fire(grid, step, floor_idx=0):
     """
     Spread fire on a single floor grid.
     floor_idx controls spread probability:
-      Floor 0 (ground): 14% — maximum danger
-      Floor 1         :  10% — medium
-      Floor 2 (top)   :  7% — slow
+      Floor 0 (ground): 24% — maximum danger
+      Floor 1         : 20% — medium
+      Floor 2 (top)   : 16% — slow
     """
     new_grid = grid.copy()
 

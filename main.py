@@ -71,9 +71,11 @@ def main():
     # ── Main loop — restart re-enters here ───────────────────────────────────
     while True:
         # Flush any stale font objects from a previous pygame.quit() so that
-        # city_phase_base lazy fonts are recreated fresh this iteration.
+        # city_phase_base and visualize lazy fonts are recreated fresh this iteration.
         import city_phase_base as _cpb
         _cpb._invalidate_fonts()
+        import visualize as _viz
+        _viz._invalidate_fonts()
         pygame.init()
         pygame.event.clear()   # discard any stale events from previous phase
 

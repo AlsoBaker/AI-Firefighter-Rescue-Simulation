@@ -97,6 +97,7 @@ def dijkstra(grid, start, goal, allow_fire=False, weights=None):
             PERSON_DANGER:2,
             HOSPITAL:     1,
             STAIRCASE:    1,
+            FIREFIGHTER:  1,   # treat occupied FF cells as passable (same as A*/BFS)
             OBSTACLE:     float('inf'),
             FIRE:         3 if allow_fire else float('inf'),
         }

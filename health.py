@@ -47,7 +47,7 @@ class HealthSystem:
 
     def tick_civilian_damage(self, grids):
         """
-        Every fire-spread tick civilians adjacent to fire lose 1 HP.
+        Every fire-spread tick civilians adjacent to or standing on fire lose 1 HP.
         Returns list of (floor, r, c) where HP just hit 0.
         """
         newly_dead = []
@@ -56,11 +56,14 @@ class HealthSystem:
                 for c in range(COLS):
                     if grid[r, c] not in (PERSON, PERSON_DANGER):
                         continue
-                    adjacent_to_fire = any(
+                    # Damage if adjacent to fire OR standing directly on a fire cell
+                    # (the latter can happen on the same tick fire spreads into the cell
+                    # before the civilian has been processed).
+                    in_or_near_fire = any(
                         0 <= nr < ROWS and 0 <= nc < COLS and grid[nr, nc] == FIRE
                         for nr, nc in ((r+1,c),(r-1,c),(r,c+1),(r,c-1))
-                    )
-                    if adjacent_to_fire:
+                    ) or grid[r, c] == FIRE
+                    if in_or_near_fire:
                         hp = self.damage(floor_idx, r, c, 1)
                         if hp <= 0:
                             newly_dead.append((floor_idx, r, c))
@@ -82,9 +85,13 @@ class HealthSystem:
                 for nr, nc in ((r+1,c),(r-1,c),(r,c+1),(r,c-1))
             )
             if not near_fire:
-                # Also drain water if standing directly on fire
-                if grid[r, c] == FIRE and ff.water > 0:
-                    ff.water = max(0, ff.water - WATER_FIRE_STEP)
+                # Standing directly on fire (no adjacent fire cells)
+                if grid[r, c] == FIRE:
+                    if ff.water > 0:
+                        ff.water = max(0, ff.water - WATER_FIRE_STEP)
+                    else:
+                        # No water and standing on fire — take HP damage
+                        ff.hp = max(0, ff.hp - 1)
                 continue
 
             if ff.water > 0:

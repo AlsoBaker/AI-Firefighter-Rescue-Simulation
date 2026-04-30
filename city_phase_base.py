@@ -27,30 +27,38 @@ OFFSET_Y  = (SCREEN_H - CELL_SIZE * CITY_ROWS) // 2
 ASSETS = "assets"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
-C_BG            = (12, 14, 18)
-C_ROAD          = (68, 70, 78)
+C_BG            = (8, 10, 16)          # deep night sky
+C_ROAD          = (52, 54, 62)         # dark asphalt
+C_ROAD_CENTRE   = (72, 70, 44)         # faint centre-line glow
+C_ROAD_KERB     = (38, 38, 46)         # slightly darker road edge
 C_ROAD_LINE     = (90, 88, 50)
-C_INTER         = (78, 76, 58)
-C_CROSS_WALK    = (200, 200, 195)
+C_INTER         = (62, 60, 46)         # slightly warmer than road
+C_CROSS_WALK    = (195, 195, 188)
 C_ROAD_CLOSURE  = (210, 140, 20)
-C_CLOSURE_STRIP = (40, 40, 40)
-C_RIVER         = (30, 70, 130)
-C_RIVER_SHINE   = (50, 100, 170)
-C_BRIDGE        = (120, 100, 70)
-C_BRIDGE_PLANK  = (100, 82, 55)
-C_FIRE_ST       = (170, 70, 20)
+C_CLOSURE_STRIP = (35, 35, 35)
+C_RIVER         = (22, 58, 118)        # deeper night water
+C_RIVER_DEEP    = (16, 44, 92)         # darkest water shade
+C_RIVER_SHINE   = (60, 120, 200)       # bright shimmer
+C_RIVER_MID     = (38, 80, 150)        # mid shimmer
+C_BRIDGE        = (108, 90, 62)
+C_BRIDGE_PLANK  = (88, 72, 48)
+C_BRIDGE_RAIL   = (140, 118, 82)
+C_FIRE_ST       = (160, 58, 14)
 C_FIRE_ST_TXT   = (255, 210, 170)
-C_HOSP          = (30, 110, 55)
+C_HOSP          = (24, 96, 48)
 C_HOSP_TARGET   = (255, 240, 80)
-C_PATH_DONE     = (140, 140, 140)
+C_PATH_DONE     = (100, 100, 115)
 C_PATH_AHEAD    = (255, 210, 40)
-C_PANEL         = (16, 18, 24)
-C_PANEL_LINE    = (40, 42, 52)
+C_PATH_GLOW     = (180, 140, 0)        # wide dim layer for path glow
+C_PANEL         = (12, 14, 22)
+C_PANEL_LINE    = (36, 38, 50)
 C_TEXT          = (210, 212, 220)
 C_TEXT_DIM      = (100, 104, 116)
 C_GOLD          = (255, 200, 50)
 C_GREEN         = (50, 200, 80)
-C_NAME_TXT      = (160, 158, 120)
+C_NAME_TXT      = (140, 138, 100)
+C_BLDG_HILIT    = 18    # additive brightness for building top/left bevel
+C_BLDG_SHADOW   = 22    # subtractive darkness for building bottom/right shadow
 C_CAR           = [(220, 60, 60), (60, 140, 220), (240, 200, 50),
                    (80, 200, 100), (200, 80, 200), (220, 140, 50)]
 
@@ -68,6 +76,10 @@ def _font(size):
 def _invalidate_fonts():
     """Call this after pygame.quit() so fonts are recreated on next use."""
     _fonts.clear()
+    # Also invalidate cached car image surfaces — they are tied to the pygame
+    # context and become invalid after pygame.quit().
+    global _car_images
+    _car_images = None
 
 # Convenience accessors — use these everywhere instead of bare F_* variables.
 def F_LARGE():  return _font(42)
@@ -246,40 +258,86 @@ class BaseCityPhase:
         self.img_buildings = [img for img in raw if img is not None] or None
 
     def _draw_city(self):
-        cs = CELL_SIZE
+        cs  = CELL_SIZE
+        af  = getattr(self, 'anim_frame', 0)
+
         for r in range(CITY_ROWS):
             for c in range(CITY_COLS):
                 x, y = _px(r, c)
                 cell = self.grid[r, c]
 
+                # ── BUILDING ────────────────────────────────────────────────
                 if cell == BUILDING:
-                    col = self.building_colors.get((r, c), (50, 50, 64))
-                    pygame.draw.rect(self.screen, col, (x, y, cs, cs))
+                    base = self.building_colors.get((r, c), (50, 50, 64))
+                    pygame.draw.rect(self.screen, base, (x, y, cs, cs))
 
+                    # Subtle window dot — every other cell in a checkerboard
+                    if cs >= 8 and (r + c) % 2 == 0:
+                        win_col = (
+                            min(255, base[0] + 30),
+                            min(255, base[1] + 28),
+                            min(255, base[2] + 18),
+                        )
+                        wr = max(1, cs // 6)
+                        wx = x + cs // 2 - wr // 2
+                        wy = y + cs // 2 - wr // 2
+                        pygame.draw.rect(self.screen, win_col, (wx, wy, wr, wr))
+
+                    # 3-D bevel: top + left bright, bottom + right dark
+                    if cs >= 6:
+                        hi  = tuple(min(255, v + C_BLDG_HILIT)  for v in base)
+                        sh  = tuple(max(0,   v - C_BLDG_SHADOW) for v in base)
+                        pygame.draw.line(self.screen, hi, (x, y),      (x+cs-1, y),      1)
+                        pygame.draw.line(self.screen, hi, (x, y),      (x,      y+cs-1), 1)
+                        pygame.draw.line(self.screen, sh, (x, y+cs-1), (x+cs-1, y+cs-1), 1)
+                        pygame.draw.line(self.screen, sh, (x+cs-1, y), (x+cs-1, y+cs-1), 1)
+
+                # ── ROAD ────────────────────────────────────────────────────
                 elif cell == ROAD:
                     pygame.draw.rect(self.screen, C_ROAD, (x, y, cs, cs))
+                    # Kerb strip along both long edges
+                    if cs >= 8:
+                        pygame.draw.line(self.screen, C_ROAD_KERB,
+                                         (x, y), (x+cs-1, y), 1)
+                        pygame.draw.line(self.screen, C_ROAD_KERB,
+                                         (x, y+cs-1), (x+cs-1, y+cs-1), 1)
+                    # Centre dashed line
                     if cs >= 10:
                         my_  = y + cs // 2
                         dash = max(3, cs // 4)
                         for i in range(0, cs, dash * 2):
-                            pygame.draw.line(self.screen, C_ROAD_LINE,
+                            pygame.draw.line(self.screen, C_ROAD_CENTRE,
                                              (x+i, my_), (x+i+dash, my_), 1)
 
+                # ── INTERSECTION ────────────────────────────────────────────
                 elif cell == INTERSECTION:
                     pygame.draw.rect(self.screen, C_INTER, (x, y, cs, cs))
+                    # Zebra crosswalks — 4 sides
                     sw = max(2, cs // 5)
                     for i in range(0, cs, sw * 2):
-                        pygame.draw.rect(self.screen, C_CROSS_WALK, (x+i, y, sw, 3))
-                        pygame.draw.rect(self.screen, C_CROSS_WALK, (x+i, y+cs-3, sw, 3))
+                        # top strip
+                        pygame.draw.rect(self.screen, C_CROSS_WALK,
+                                         (x+i, y, sw, max(2, cs//6)))
+                        # bottom strip
+                        pygame.draw.rect(self.screen, C_CROSS_WALK,
+                                         (x+i, y+cs-max(2, cs//6), sw, max(2, cs//6)))
+                    for i in range(0, cs, sw * 2):
+                        # left strip
+                        pygame.draw.rect(self.screen, C_CROSS_WALK,
+                                         (x, y+i, max(2, cs//6), sw))
+                        # right strip
+                        pygame.draw.rect(self.screen, C_CROSS_WALK,
+                                         (x+cs-max(2, cs//6), y+i, max(2, cs//6), sw))
+                    # Road name (tiny, top-left only)
                     name = self.road_names.get((r, c), "")
-                    if name and cs >= 14:
-                        for pi, part in enumerate(name.split(" / ")[:2]):
-                            surf = F_TINY().render(part, True, C_NAME_TXT)
-                            if surf.get_width() <= cs:
-                                self.screen.blit(surf, (x+1, y+1+pi*8))
+                    if name and cs >= 16:
+                        parts = name.split(" / ")[:1]   # just the H-road name
+                        surf  = F_TINY().render(parts[0], True, C_NAME_TXT)
+                        if surf.get_width() <= cs - 2:
+                            self.screen.blit(surf, (x+2, y+2))
 
+                # ── ROAD CLOSURE ────────────────────────────────────────────
                 elif cell == ROAD_CLOSURE:
-                    # Amber background + dark diagonal stripes = construction barrier
                     pygame.draw.rect(self.screen, C_ROAD_CLOSURE, (x, y, cs, cs))
                     stripe_w = max(2, cs // 4)
                     for offset in range(-cs, cs * 2, stripe_w * 2):
@@ -290,28 +348,61 @@ class BaseCityPhase:
                             pygame.draw.lines(self.screen, C_CLOSURE_STRIP,
                                               False, pts, max(1, stripe_w // 2))
                     if cs >= 12:
-                        lbl = F_TINY().render("X", True, (30, 30, 30))
+                        lbl = F_TINY().render("✕", True, (20, 20, 20))
                         self.screen.blit(lbl, (x + (cs - lbl.get_width()) // 2,
                                                y + (cs - lbl.get_height()) // 2))
 
+                # ── RIVER ───────────────────────────────────────────────────
                 elif cell == RIVER:
                     pygame.draw.rect(self.screen, C_RIVER, (x, y, cs, cs))
-                    sy = y + cs // 2
-                    for sx in range(x, x + cs, 4):
-                        pygame.draw.line(self.screen, C_RIVER_SHINE,
-                                         (sx, sy), (sx+2, sy), 1)
+                    # Darker deep-water strip in the middle
+                    deep_h = max(2, cs // 3)
+                    pygame.draw.rect(self.screen, C_RIVER_DEEP,
+                                     (x, y + (cs - deep_h)//2, cs, deep_h))
+                    # Animated shimmer lines — two layers at different offsets
+                    wave_offset = (af // 4) % cs
+                    for layer, col, width in [
+                        (0, C_RIVER_MID,   1),
+                        (4, C_RIVER_SHINE, 1),
+                    ]:
+                        sy = y + cs // 3 + layer
+                        for sx in range(x - wave_offset, x + cs, 6):
+                            if x <= sx < x + cs:
+                                pygame.draw.line(self.screen, col,
+                                                 (sx, sy), (min(sx+3, x+cs-1), sy), width)
+                    # Second shimmer row
+                    wave_offset2 = (af // 6 + cs // 2) % cs
+                    sy2 = y + cs * 2 // 3
+                    for sx in range(x - wave_offset2, x + cs, 5):
+                        if x <= sx < x + cs:
+                            pygame.draw.line(self.screen, C_RIVER_MID,
+                                             (sx, sy2), (min(sx+2, x+cs-1), sy2), 1)
 
+                # ── BRIDGE ──────────────────────────────────────────────────
                 elif cell == BRIDGE:
                     pygame.draw.rect(self.screen, C_BRIDGE, (x, y, cs, cs))
-                    for bxi in range(x+2, x+cs-1, max(3, cs//4)):
+                    # Plank lines
+                    plank_gap = max(3, cs // 4)
+                    for bxi in range(x + 2, x + cs - 1, plank_gap):
                         pygame.draw.line(self.screen, C_BRIDGE_PLANK,
-                                         (bxi, y), (bxi, y+cs), 1)
+                                         (bxi, y+2), (bxi, y+cs-2), 1)
+                    # Railing lines top and bottom
+                    pygame.draw.line(self.screen, C_BRIDGE_RAIL,
+                                     (x, y+1), (x+cs-1, y+1), 2)
+                    pygame.draw.line(self.screen, C_BRIDGE_RAIL,
+                                     (x, y+cs-2), (x+cs-1, y+cs-2), 2)
 
+                # ── FIRE STATION ────────────────────────────────────────────
                 elif cell == FIRE_STATION:
                     pygame.draw.rect(self.screen, C_FIRE_ST, (x, y, cs, cs))
+                    # Bright top bevel
+                    hi = tuple(min(255, v + 30) for v in C_FIRE_ST)
+                    pygame.draw.line(self.screen, hi, (x, y), (x+cs-1, y), 1)
+                    pygame.draw.line(self.screen, hi, (x, y), (x, y+cs-1), 1)
                     lbl = F_TINY().render("FS", True, C_FIRE_ST_TXT)
-                    self.screen.blit(lbl, (x+1, y+1))
+                    self.screen.blit(lbl, (x+2, y+2))
 
+                # ── HOSPITAL cell (individual tiles under block sprite) ─────
                 elif cell == HOSPITAL:
                     pygame.draw.rect(self.screen, C_HOSP, (x, y, cs, cs))
 

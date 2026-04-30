@@ -46,9 +46,10 @@ def save_score(score, rescued, total_people, steps, algorithm, num_floors):
         print(f"[leaderboard] could not save: {exc}")
 
     for i, e in enumerate(scores):
-        if (e["score"] == entry["score"] and
-                e["date"] == entry["date"] and
-                e["steps"] == entry["steps"]):
+        if (e["score"]   == entry["score"] and
+                e["date"]    == entry["date"]  and
+                e["steps"]   == entry["steps"] and
+                e["rescued"] == entry["rescued"]):
             return i + 1
     return None
 

@@ -84,6 +84,8 @@ class FiretruckPhase(BaseCityPhase):
         self.cfg_seed         = None       # None = random
         self.cfg_use_seed     = False
         self.cfg_seed_val     = 42         # value shown when seed is enabled
+        self.cfg_seed_input   = "42"       # raw string being typed in the seed field
+        self.cfg_seed_focused = False      # True when seed text field has keyboard focus
         self.cfg_tick_mode    = 'tick'   # 'tick' (discrete) or 'continuous' (smooth glide)
         self._btn_rects       = {}         # populated by _draw_config, read by handle_events
         self._hovered_btn     = None
@@ -384,6 +386,24 @@ class FiretruckPhase(BaseCityPhase):
     ALGO_LABELS = ['A*', 'BFS', 'DIJKSTRA', 'D* LITE']
 
     def _handle_config_key(self, k):
+        # ── Seed text field is focused — capture digit / backspace input ──────
+        if self.cfg_seed_focused and self.cfg_use_seed:
+            if k == pygame.K_BACKSPACE:
+                self.cfg_seed_input = self.cfg_seed_input[:-1]
+            elif k in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_TAB):
+                self.cfg_seed_focused = False
+            elif k == pygame.K_ESCAPE:
+                self.cfg_seed_focused = False
+                return   # don't also quit
+            else:
+                ch = pygame.key.name(k)
+                if ch.isdigit() and len(self.cfg_seed_input) < 6:
+                    self.cfg_seed_input += ch
+            # Keep cfg_seed_val in sync with whatever is typed
+            self.cfg_seed_val = int(self.cfg_seed_input) if self.cfg_seed_input else 0
+            return
+
+        # ── Normal config shortcuts ───────────────────────────────────────────
         if k == pygame.K_RETURN or k == pygame.K_SPACE:
             self.state = 'done'
         elif k == pygame.K_LEFT:
@@ -392,6 +412,9 @@ class FiretruckPhase(BaseCityPhase):
             self.cfg_firefighters = min(8, self.cfg_firefighters + 1)
 
     def _handle_config_click(self, mx, my):
+        # Clicking anywhere outside the seed field blurs it
+        seed_field_clicked = False
+
         for name, rect in self._btn_rects.items():
             if not rect.collidepoint(mx, my):
                 continue
@@ -407,15 +430,18 @@ class FiretruckPhase(BaseCityPhase):
                 self.cfg_steps = min(1000, self.cfg_steps + 50)
             elif name == 'seed_toggle':
                 self.cfg_use_seed = not self.cfg_use_seed
-            elif name == 'seed_minus':
-                self.cfg_seed_val = max(0, self.cfg_seed_val - 1)
-            elif name == 'seed_plus':
-                self.cfg_seed_val += 1
+                self.cfg_seed_focused = False
+            elif name == 'seed_field':
+                self.cfg_seed_focused = True
+                seed_field_clicked = True
             elif name.startswith('mode_'):
-                self.cfg_tick_mode = name[5:]   # 'continuous' or 'tick'
+                self.cfg_tick_mode = name[5:]
             elif name == 'deploy':
                 self.state = 'done'
             break
+
+        if not seed_field_clicked:
+            self.cfg_seed_focused = False
 
     def _draw_config(self):
         """Full-screen mission briefing / config panel shown after cutscene."""
@@ -573,10 +599,31 @@ class FiretruckPhase(BaseCityPhase):
                  active=True, name='seed_toggle', accent=tog_col)
 
         if self.cfg_use_seed:
-            val_surf = F_LARGE().render(str(self.cfg_seed_val), True, (255, 200, 60))
-            self.screen.blit(val_surf, (val_cx - val_surf.get_width() // 2, ry))
-            pm_btn("−", val_cx - 80 - btn_sz, ry + 2, btn_sz, 'seed_minus')
-            pm_btn("+", val_cx + 80,           ry + 2, btn_sz, 'seed_plus')
+            # Text input box
+            field_w, field_h = 200, 36
+            field_x = val_cx - field_w // 2
+            field_y = ry - 2
+            focused  = self.cfg_seed_focused
+            box_col  = (60, 55, 40) if focused else (28, 26, 22)
+            bord_col = (255, 200, 60) if focused else (100, 85, 50)
+
+            field_rect = pygame.Rect(field_x, field_y, field_w, field_h)
+            self._btn_rects['seed_field'] = field_rect
+            pygame.draw.rect(self.screen, box_col,  field_rect, border_radius=6)
+            pygame.draw.rect(self.screen, bord_col, field_rect, 2, border_radius=6)
+
+            # Display typed value; show cursor when focused
+            display_text = self.cfg_seed_input if self.cfg_seed_input else "0"
+            if focused and (self.anim_frame // 30) % 2 == 0:
+                display_text += "|"
+            val_surf = F_LARGE().render(display_text, True, (255, 200, 60))
+            self.screen.blit(val_surf, (field_x + (field_w - val_surf.get_width()) // 2,
+                                        field_y + (field_h - val_surf.get_height()) // 2))
+
+            # Helper hint below the box
+            hint_text = "Click to edit  •  0 – 99999" if not focused else "Type digits  •  Enter to confirm"
+            hint_surf = F_TINY().render(hint_text, True, (90, 85, 65))
+            self.screen.blit(hint_surf, (val_cx - hint_surf.get_width() // 2, field_y + field_h + 4))
         else:
             note = F_SMALL().render("Each run will be unique", True, (100, 130, 100))
             self.screen.blit(note, (COL_L + 136, ry + 7))

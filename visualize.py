@@ -57,10 +57,23 @@ C_WATER_LOW  = (80, 80, 180)
 C_BAR_BG     = (28, 28, 28)
 C_GOLD       = (255, 200, 50)
 
-F_LARGE  = pygame.font.Font(None, 38)
-F_MEDIUM = pygame.font.Font(None, 26)
-F_SMALL  = pygame.font.Font(None, 20)
-F_TINY   = pygame.font.Font(None, 15)
+_viz_fonts = {}
+
+def _font(size):
+    """Return a cached pygame.Font of the given size, creating it if needed."""
+    if size not in _viz_fonts:
+        pygame.font.init()
+        _viz_fonts[size] = pygame.font.Font(None, size)
+    return _viz_fonts[size]
+
+def _invalidate_fonts():
+    """Call after pygame.quit() so fonts are recreated on next use."""
+    _viz_fonts.clear()
+
+def F_LARGE():  return _font(38)
+def F_MEDIUM(): return _font(26)
+def F_SMALL():  return _font(20)
+def F_TINY():   return _font(15)
 
 ASSETS = "assets"
 
@@ -296,8 +309,11 @@ class PygameSimulation:
 
         self.step += 1
 
-        for i in range(NUM_FLOORS):
-            self.grids[i] = spread_fire(self.grids[i], self.step, floor_idx=i)
+        # Fire spreads every 4 steps; skip the call entirely on other steps
+        # to avoid copying all floor arrays for no effect.
+        if self.step % 4 == 0:
+            for i in range(NUM_FLOORS):
+                self.grids[i] = spread_fire(self.grids[i], self.step, floor_idx=i)
 
         if self.step % 4 == 0:
             dead = self.health.tick_civilian_damage(self.grids)
@@ -575,7 +591,7 @@ class PygameSimulation:
                                      (x + 2, sy), (x + cs - 2, sy), 1)
                 # Direction arrow text
                 arrow = "▲" if col == STAIR_UP_COL else "▼"
-                lbl   = F_TINY.render(arrow, True, (140, 190, 255))
+                lbl   = F_TINY().render(arrow, True, (140, 190, 255))
                 self.screen.blit(lbl, (x + cs - lbl.get_width() - 2, y + 2))
                 # Border
                 pygame.draw.rect(self.screen, (60, 110, 170), (x, y, cs, cs), 1)
@@ -674,8 +690,8 @@ class PygameSimulation:
             g      = self.grids[i]
             people = int(np.sum(g == PERSON)) + int(np.sum(g == PERSON_DANGER))
             fire   = int(np.sum(g == FIRE))
-            self._draw_text(f"Floor {i+1}", F_SMALL, C_TEXT, tx + tab_w//2, ty + 4,  center=True)
-            self._draw_text(f"P:{people}  F:{fire}", F_TINY, C_TEXT_DIM, tx + tab_w//2, ty + 22, center=True)
+            self._draw_text(f"Floor {i+1}", F_SMALL(), C_TEXT, tx + tab_w//2, ty + 4,  center=True)
+            self._draw_text(f"P:{people}  F:{fire}", F_TINY(), C_TEXT_DIM, tx + tab_w//2, ty + 22, center=True)
 
     # ----------------------------------------------------------
     # Left panel
@@ -690,7 +706,7 @@ class PygameSimulation:
         n_ff       = len(self.ff_manager.firefighters) if self.ff_manager else 0
         total_fire = sum(int(np.sum(g == FIRE)) for g in self.grids)
 
-        self._draw_text("SIMULATION", F_LARGE, C_TEXT, 14, y); y += 44
+        self._draw_text("SIMULATION", F_LARGE(), C_TEXT, 14, y); y += 44
 
         rows = [
             ("Step",         f"{self.step}/{self.max_steps}"),
@@ -702,13 +718,13 @@ class PygameSimulation:
             ("Status",       "PAUSED" if self.paused else "RUNNING"),
         ]
         for label, val in rows:
-            self._draw_text(f"{label}:", F_SMALL, C_TEXT_DIM, 14, y)
-            v = F_SMALL.render(val, True, C_TEXT)
+            self._draw_text(f"{label}:", F_SMALL(), C_TEXT_DIM, 14, y)
+            v = F_SMALL().render(val, True, C_TEXT)
             self.screen.blit(v, (PANEL_W - v.get_width() - 14, y))
             y += 22
 
         y += 8
-        self._draw_text("Firefighters", F_SMALL, C_TEXT_DIM, 14, y); y += 18
+        self._draw_text("Firefighters", F_SMALL(), C_TEXT_DIM, 14, y); y += 18
 
         if self.ff_manager:
             for idx, ff in enumerate(self.ff_manager.firefighters):
@@ -730,12 +746,12 @@ class PygameSimulation:
 
                 self._draw_text(
                     f"FF{idx+1} F{ff.current_floor+1}  {ff.hp}HP  {ff.water}W",
-                    F_TINY, C_TEXT_DIM, bx, y + 14
+                    F_TINY(), C_TEXT_DIM, bx, y + 14
                 )
                 y += 30
 
         y += 8
-        self._draw_text("Legend", F_SMALL, C_TEXT_DIM, 14, y); y += 18
+        self._draw_text("Legend", F_SMALL(), C_TEXT_DIM, 14, y); y += 18
         for color, label in [
             ((45, 180, 45),  "Civilian"),
             ((200, 100, 0),  "In danger"),
@@ -746,7 +762,7 @@ class PygameSimulation:
             ((200, 140, 20), "Firefighter"),
         ]:
             pygame.draw.rect(self.screen, color, (14, y + 2, 11, 11))
-            self._draw_text(label, F_TINY, C_TEXT_DIM, 30, y + 1)
+            self._draw_text(label, F_TINY(), C_TEXT_DIM, 30, y + 1)
             y += 17
 
         y += 8
@@ -757,10 +773,10 @@ class PygameSimulation:
                      f"M      Mode  [{mode_label}]",
                      "R  Reset","ESC  Quit","",
                      "LClick  Place fire*","RClick  Remove fire*","*paused only"]:
-            self._draw_text(line, F_TINY, C_TEXT_DIM, 14, y); y += 15
+            self._draw_text(line, F_TINY(), C_TEXT_DIM, 14, y); y += 15
 
         if self.end_reason:
-            msg = F_SMALL.render(self.end_reason, True, C_GOLD)
+            msg = F_SMALL().render(self.end_reason, True, C_GOLD)
             self.screen.blit(msg, (14, SCREEN_H - 36))
 
     # ----------------------------------------------------------
@@ -843,7 +859,7 @@ class PygameSimulation:
         }
 
         # Label above the whole minimap
-        lbl = F_TINY.render("ALL FLOORS", True, C_TEXT_DIM)
+        lbl = F_TINY().render("ALL FLOORS", True, C_TEXT_DIM)
         self.screen.blit(lbl, (mm_x + (mm_w - lbl.get_width()) // 2, mm_y0 - 14))
 
         for fi in range(NUM_FLOORS - 1, -1, -1):   # draw top floor first (F3 at top)
@@ -878,7 +894,7 @@ class PygameSimulation:
                              (mm_x - 1, fy - 1, mm_w + 2, mm_h + 2), border_w)
 
             # Floor label
-            fl = F_TINY.render(f"F{fi + 1}", True,
+            fl = F_TINY().render(f"F{fi + 1}", True,
                                (150, 190, 255) if active else (70, 68, 60))
             self.screen.blit(fl, (mm_x + mm_w + 3, fy + mm_h // 2 - fl.get_height() // 2))
 
@@ -897,10 +913,10 @@ class PygameSimulation:
         # ── Title bar (full width, own zone) ──────────────────────────
         pygame.draw.rect(self.screen, (28, 28, 28), (0, 0, SCREEN_W, 64))
         pygame.draw.line(self.screen, (55, 55, 55), (0, 64), (SCREEN_W, 64), 1)
-        self._draw_text("SIMULATION RESULTS", F_LARGE, C_TEXT,
+        self._draw_text("SIMULATION RESULTS", F_LARGE(), C_TEXT,
                         SCREEN_W // 2, 14, center=True)
         self._draw_text(f"Score: {score:.0f} / 2000{rank_txt}",
-                        F_LARGE, C_GOLD, SCREEN_W // 2, 38, center=True)
+                        F_LARGE(), C_GOLD, SCREEN_W // 2, 38, center=True)
 
         # ── Layout ────────────────────────────────────────────────────
         PAD     = 24
@@ -928,10 +944,10 @@ class PygameSimulation:
         ir_h         = bot_y - ir_y - 4
 
         # ── Section labels ─────────────────────────────────────────────
-        self._draw_text("Performance graph", F_SMALL, C_TEXT_DIM, gx, top_y)
-        self._draw_text("Top 10 scores",     F_SMALL, C_TEXT_DIM, bx, top_y)
+        self._draw_text("Performance graph", F_SMALL(), C_TEXT_DIM, gx, top_y)
+        self._draw_text("Top 10 scores",     F_SMALL(), C_TEXT_DIM, bx, top_y)
         # Label sits in the gap between leaderboard and incident report card
-        self._draw_text("Incident Report",   F_SMALL, C_TEXT_DIM, bx, ir_y - 20)
+        self._draw_text("Incident Report",   F_SMALL(), C_TEXT_DIM, bx, ir_y - 20)
 
         graph_y = top_y + 22
 
@@ -962,14 +978,14 @@ class PygameSimulation:
         for color, lbl in [((215,55,55),"Fire"),((50,200,50),"Rescued"),
                             ((225,150,20),"Danger"),((100,180,255),"FF HP")]:
             pygame.draw.line(self.screen, color, (gx+8, ly+6), (gx+30, ly+6), 2)
-            self._draw_text(lbl, F_TINY, C_TEXT_DIM, gx+36, ly)
+            self._draw_text(lbl, F_TINY(), C_TEXT_DIM, gx+36, ly)
             ly += 17
 
         # ── Leaderboard table (right column, top) ──────────────────────
         board_y = top_y + 22
         pygame.draw.rect(self.screen, (40, 40, 40), (bx, board_y, bw, board_row_h))
         for txt, ox in [("#",6),("Score",26),("Rescued",96),("Steps",152),("Algo",206),("Date",256)]:
-            self._draw_text(txt, F_TINY, C_TEXT_DIM, bx+ox, board_y+5)
+            self._draw_text(txt, F_TINY(), C_TEXT_DIM, bx+ox, board_y+5)
 
         ry = board_y + board_row_h
         for i, entry in enumerate(self.leaderboard_data):
@@ -987,7 +1003,7 @@ class PygameSimulation:
                 (entry['algorithm'][:4], 206,  dc),
                 (entry['date'][5:],      256,  dc),
             ]:
-                self._draw_text(txt, F_TINY, col, bx+ox, ry+5)
+                self._draw_text(txt, F_TINY(), col, bx+ox, ry+5)
             ry += board_row_h
 
         # ── Incident Report Card (right column, below leaderboard) ──────
@@ -1000,7 +1016,7 @@ class PygameSimulation:
             # Amber header strip
             pygame.draw.rect(self.screen, (30, 22, 8),
                              (bx, ir_y, bw, 18), border_radius=6)
-            hdr = F_TINY.render("▌ INCIDENT REPORT  —  FIRE DEPT. SIMULATION CITY",
+            hdr = F_TINY().render("▌ INCIDENT REPORT  —  FIRE DEPT. SIMULATION CITY",
                                  True, (180, 140, 50))
             self.screen.blit(hdr, (bx + 8, ir_y + 3))
 
@@ -1020,8 +1036,8 @@ class PygameSimulation:
 
             def ir_row(label, val, col_x, colour=C_TEXT):
                 nonlocal iy
-                ls = F_TINY.render(label,    True, (110, 100, 70))
-                vs = F_TINY.render(str(val), True, colour)
+                ls = F_TINY().render(label,    True, (110, 100, 70))
+                vs = F_TINY().render(str(val), True, colour)
                 self.screen.blit(ls, (col_x, iy))
                 self.screen.blit(vs, (col_x + col_w - vs.get_width() - 4, iy))
                 iy += row_h2
@@ -1052,7 +1068,7 @@ class PygameSimulation:
         # ── Footer ─────────────────────────────────────────────────────
         pygame.draw.line(self.screen, (45,45,45), (0, bot_y+4), (SCREEN_W, bot_y+4), 1)
         self._draw_text("R   restart          A   ambulance phase          ESC   quit",
-                        F_MEDIUM, C_TEXT_DIM, SCREEN_W//2, bot_y+16, center=True)
+                        F_MEDIUM(), C_TEXT_DIM, SCREEN_W//2, bot_y+16, center=True)
 
     # ----------------------------------------------------------
     # Main draw

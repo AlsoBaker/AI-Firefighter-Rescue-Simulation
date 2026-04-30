@@ -13,7 +13,7 @@ from city_phase_base import (
     BaseCityPhase, TrafficLight, TrafficCar, CityFireParticle, city_astar,
     SCREEN_W, SCREEN_H, PANEL_W, CELL_SIZE, OFFSET_X, OFFSET_Y,
     C_BG, C_PANEL, C_PANEL_LINE, C_TEXT, C_TEXT_DIM, C_GOLD, C_GREEN,
-    C_PATH_DONE, C_PATH_AHEAD, C_CAR, C_ROAD, C_INTER, C_FIRE_ST,
+    C_PATH_DONE, C_PATH_AHEAD, C_PATH_GLOW, C_CAR, C_ROAD, C_INTER, C_FIRE_ST,
     C_HOSP, C_RIVER, C_BRIDGE, C_ROAD_CLOSURE,
     F_LARGE, F_MEDIUM, F_SMALL, F_TINY,
     _px, _centre, _load,
@@ -198,16 +198,30 @@ class AmbulancePhase(BaseCityPhase):
         surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
         n = len(self.trail)
         for i in range(1, n):
-            alpha = int(30 + 150 * i / n)
-            pygame.draw.line(surf, (200, 200, 200, alpha),
+            frac  = i / n
+            # Wide dim glow layer
+            alpha_wide = int(15 + 50 * frac)
+            pygame.draw.line(surf, (180, 180, 220, alpha_wide),
+                             self.trail[i-1], self.trail[i], 5)
+            # Narrow bright core
+            alpha_core = int(40 + 140 * frac)
+            pygame.draw.line(surf, (220, 220, 255, alpha_core),
                              self.trail[i-1], self.trail[i], 2)
         self.screen.blit(surf, (0, 0))
 
     def _draw_path(self):
         if len(self.path) < 2: return
+        # Travelled path — dim grey
         for i in range(min(self.path_idx, len(self.path)-1)):
             pygame.draw.line(self.screen, C_PATH_DONE,
                              _centre(*self.path[i]), _centre(*self.path[i+1]), 2)
+        # Upcoming path — glowing gold (wide dim layer + bright dashes)
+        surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+        for i in range(self.path_idx, len(self.path)-1):
+            p0 = _centre(*self.path[i])
+            p1 = _centre(*self.path[i+1])
+            pygame.draw.line(surf, (*C_PATH_GLOW, 60), p0, p1, 5)
+        self.screen.blit(surf, (0, 0))
         dash = True
         for i in range(self.path_idx, len(self.path)-1):
             if dash:
@@ -222,12 +236,20 @@ class AmbulancePhase(BaseCityPhase):
     def _draw_siren(self):
         if self.delivered: return
         ax, ay = self.amb_pos
-        col = (220,50,50) if (self.anim_frame//30)%2==0 else (50,80,220)
-        r   = self.siren_r
-        if r > 0:
-            surf = pygame.Surface((r*2+2, r*2+2), pygame.SRCALPHA)
-            pygame.draw.circle(surf, (*col, max(0, 120-r*2)), (r+1, r+1), r, 2)
-            self.screen.blit(surf, (ax-r-1, ay-r-1))
+        # Alternate red/blue every 20 frames for a realistic police flash
+        col1 = (230, 50, 50)  if (self.anim_frame // 20) % 2 == 0 else (50, 90, 230)
+        col2 = (50, 90, 230)  if (self.anim_frame // 20) % 2 == 0 else (230, 50, 50)
+        for ring_r, col, base_alpha in [
+            (self.siren_r,          col1, 110),
+            (max(0, self.siren_r - CELL_SIZE // 2), col2, 70),
+        ]:
+            if ring_r <= 0:
+                continue
+            alpha = max(0, base_alpha - ring_r * 2)
+            surf  = pygame.Surface((ring_r*2+4, ring_r*2+4), pygame.SRCALPHA)
+            pygame.draw.circle(surf, (*col, alpha),
+                               (ring_r+2, ring_r+2), ring_r, 2)
+            self.screen.blit(surf, (ax - ring_r - 2, ay - ring_r - 2))
 
     def _draw_ambulance(self):
         ax, ay = self.amb_pos

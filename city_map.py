@@ -149,8 +149,11 @@ def generate_city(seed=None):
         for r in range(r0 + 1, r1):
             for c in range(c0 + 1, c1):
                 grid[r, c] = HOSPITAL
-        road_r = road_rows[min(bi, len(road_rows)-1)]
-        road_c = road_cols[min(ci, len(road_cols)-1)]
+        # The road cell serving this hospital block is the road that forms its
+        # top/left boundary: ext_rows[bi] == road_rows[bi] and
+        # ext_cols[ci] == road_cols[ci], so we index directly — no clamping needed.
+        road_r = road_rows[bi]
+        road_c = road_cols[ci]
         hospital_positions.append((road_r, road_c))
 
     # Block sprites

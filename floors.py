@@ -7,8 +7,9 @@ from config import *
 class FloorManager:
     """
     Owns the list of per-floor grids and handles staircase switching.
-    Left-edge staircase  (col 0)        -> go UP   (+1 floor)
-    Right-edge staircase (col COLS-1)   -> go DOWN (-1 floor)
+    Both staircases (col 0 and col COLS-1) can go UP or DOWN — direction
+    is determined by ff.stair_intent set before the FF steps onto the cell.
+    Firefighters always use the nearest staircase cell (closest of all 4).
     Staircase spans rows STAIR_ROW_START and STAIR_ROW_END.
     """
 
@@ -35,35 +36,45 @@ class FloorManager:
                 c in (STAIR_UP_COL, STAIR_DOWN_COL))
 
     def stair_direction(self, r, c):
-        """Returns +1 (up), -1 (down), or 0 (not a staircase)."""
+        """
+        Returns whether (r, c) is a staircase cell: +1 or -1 (either is valid,
+        since both staircases go both directions). Returns 0 if not a staircase.
+        The actual travel direction is stored on ff.stair_intent, set before
+        the FF steps onto the cell.
+        """
         if STAIR_ROW_START <= r <= STAIR_ROW_END:
-            if c == STAIR_UP_COL:
-                return +1
-            if c == STAIR_DOWN_COL:
-                return -1
+            if c in (STAIR_UP_COL, STAIR_DOWN_COL):
+                return 1   # non-zero = is a staircase; direction comes from ff.stair_intent
         return 0
 
     def switch_floor(self, ff, direction):
         """
-        Teleport firefighter to adjacent floor via matching staircase.
-        Tries STAIR_ROW_START first; if another FF is there, uses STAIR_ROW_END.
+        Teleport firefighter to the adjacent floor in the given direction,
+        arriving at the same staircase column they used (both cols serve both
+        directions). Tries STAIR_ROW_START first; falls back to STAIR_ROW_END.
         Returns True if the switch was successful.
         """
         new_floor = ff.current_floor + direction
         if not (0 <= new_floor < self.num_floors):
             return False
 
-        arrival_col = STAIR_UP_COL if direction == +1 else STAIR_DOWN_COL
-        new_grid = self.grids[new_floor]
+        # Arrive at the same column the FF used — both staircases go both ways
+        arrival_col = ff.pos[1]
+        new_grid    = self.grids[new_floor]
 
-        # Pick whichever staircase row on the new floor is not occupied by another FF
+        origin_floor = ff.current_floor
+
         for arrival_row in (STAIR_ROW_START, STAIR_ROW_END):
             cell = int(new_grid[arrival_row, arrival_col])
-            if cell == STAIRCASE:  # empty staircase — safe to arrive here
-                ff.current_floor = new_floor
-                ff.pos           = (arrival_row, arrival_col)
-                ff.under_cell    = STAIRCASE
-                ff.current_path  = []
+            # Only arrive on a bare staircase cell — if another FF is occupying it,
+            # wait rather than stacking two FFs on the same cell.
+            if cell == STAIRCASE:
+                ff._prev_floor        = origin_floor
+                ff._prev_floor_ticks  = 0
+                ff.current_floor      = new_floor
+                ff.pos                = (arrival_row, arrival_col)
+                ff.under_cell         = STAIRCASE
+                ff.current_path       = []
                 return True
 
         # Both staircase cells occupied — wait on current floor
@@ -80,21 +91,24 @@ class FloorManager:
     def danger_count(self, floor_idx):
         return int(np.sum(self.grids[floor_idx] == PERSON_DANGER))
 
-    def best_floor_to_visit(self, current_floor):
+    def best_floor_to_visit(self, current_floor, exclude_floor=-1):
         """
         Return (floor_idx, score) of the best floor to visit next.
+
+        exclude_floor: skip this floor index (used to prevent a FF from
+        immediately switching back to the floor it just came from).
 
         Preference order:
           1. Adjacent floor (|distance| == 1) with people — pick highest score.
           2. Non-adjacent floor — only if NO adjacent floor has people at all.
 
-        This prevents firefighters on floor 1 from bypassing floor 2 entirely
-        just because floor 3 has a marginally higher danger score.
         Returns (None, 0) if no other floor has people.
         """
         adjacent, non_adjacent = [], []
         for f in range(self.num_floors):
             if f == current_floor:
+                continue
+            if f == exclude_floor:
                 continue
             score = self.danger_count(f) * 2 + self.people_count(f)
             if score <= 0:
@@ -112,7 +126,19 @@ class FloorManager:
         best_score, best_floor = max(pool)
         return best_floor, best_score
 
-    def staircase_toward(self, current_floor, target_floor):
-        """Return the staircase column that moves toward target_floor."""
-        direction = +1 if target_floor > current_floor else -1
-        return STAIR_UP_COL if direction == +1 else STAIR_DOWN_COL
+    def nearest_staircase(self, ff_pos):
+        """
+        Return the staircase cell (row, col) closest to ff_pos by Manhattan
+        distance, choosing from all 4 staircase cells:
+          (STAIR_ROW_START, STAIR_UP_COL), (STAIR_ROW_END, STAIR_UP_COL),
+          (STAIR_ROW_START, STAIR_DOWN_COL), (STAIR_ROW_END, STAIR_DOWN_COL)
+        Both columns serve both directions.
+        """
+        r, c = ff_pos
+        candidates = [
+            (STAIR_ROW_START, STAIR_UP_COL),
+            (STAIR_ROW_END,   STAIR_UP_COL),
+            (STAIR_ROW_START, STAIR_DOWN_COL),
+            (STAIR_ROW_END,   STAIR_DOWN_COL),
+        ]
+        return min(candidates, key=lambda cell: abs(cell[0] - r) + abs(cell[1] - c))
