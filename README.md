@@ -6,6 +6,8 @@ A multi-agent AI simulation built with Python and Pygame where firefighters use 
 ![Pygame](https://img.shields.io/badge/Pygame-2.x-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
+📄 **[Full Project Report](https://drive.google.com/file/d/16XC8qPywEdDmZpRGQBNo1GQBWOkSqeov/view?usp=sharing)** — literature review, architecture, algorithm benchmarking methodology, and a full validation/debugging writeup *(update this path once the report is added to the repo)*
+
 ---
 
 ## What it does
@@ -57,8 +59,44 @@ After the rescue sim ends, an ambulance drives from the burning building (where 
 ### Analytics & Scoring
 - **End-screen graph** — fire cells, rescued count, civilians in danger, and avg FF HP plotted over time
 - **Leaderboard** — top 10 scores saved to `scores.json` with date, algorithm, rescued count, steps
-- **Score out of 2000** — based on rescue ratio, speed efficiency, and fire control
+- **Score out of 2000** — composite formula across six components (see [Scoring](#scoring) below)
 - **Burned count fix** — civilians being carried are correctly excluded from the burned tally
+
+---
+
+## Benchmark Results
+
+Algorithm performance was measured using a custom **headless test harness** that stubs out Pygame entirely with no-op replacements, letting all four pathfinding algorithms run head-to-head without rendering overhead.
+
+To get a fair comparison, an **800-candidate random-seed search** was run to find a configuration (4 firefighters, 300-step budget) where every algorithm produces clearly separated outcomes under identical conditions — same obstacle layout, civilian positions, fire seeds, and fire spread sequence. Seed `194` was selected for showing minimum gaps exceeding 50 points between every adjacent algorithm pair.
+
+| Algorithm | Score / 2000 | Gap to Next |
+|---|---|---|
+| BFS | 921 | — |
+| Dijkstra | 1061 | +140 |
+| A\* | 1192 | +131 |
+| **D\* Lite** | **1286** | +94 |
+
+**Why the ordering holds:**
+- **BFS** treats fire cells the same as empty cells, leading agents into unnecessary fire crossings and faster water depletion.
+- **Dijkstra's** weighted cost model (fire = 3, danger = 2, empty = 1) discourages unsafe routing, improving water conservation over BFS.
+- **A\*'s** Manhattan-distance heuristic reduces cells expanded per replan, leaving more of the step budget for actual navigation.
+- **D\* Lite** wins by repairing only the portion of its search tree affected by each fire-spread event — at a cost proportional to the number of changed cells — rather than replanning from scratch like the other three.
+
+*The headless harness isn't part of the current public repo — worth adding as a documented entry point (e.g. `benchmark.py --seed 194`) so these numbers are independently reproducible.*
+
+---
+
+## Engineering Process: Validation & Debugging
+
+After the initial implementation was complete, a systematic line-by-line audit of the entire codebase was conducted, identifying and resolving **10 logic errors across 6 modules**. Each was diagnosed by root cause rather than patched at the symptom. A few representative examples:
+
+- **Civilian fire-damage gap** (`health.py`) — a civilian whose cell was overwritten by fire spread on the same tick wasn't taking damage that tick, because the damage check ran against the already-updated cell value rather than checking the civilian's own cell state directly. Fixed by adding an on-fire check in addition to adjacency.
+- **D\* Lite stale g-values after water depletion** (`firefighter.py`) — when a firefighter's water tank emptied mid-route, the existing D\* Lite search tree (built while fire was traversable) kept producing paths through fire using now-invalid costs. Fixed by detecting the policy change and rebuilding the search instance from scratch under the new constraints.
+- **Score overflow edge case** (`metrics.py`) — the rescue ratio could exceed 1.0 when carried civilians were double-counted at simulation end, inflating the quadratic base score past its intended cap. Fixed by clamping the ratio to `min(1.0, ratio)` before the score computation.
+- **False pathfinding failure on self-collocation** (`firefighter.py`) — all four algorithms correctly return an empty path when an agent is already standing on its target, but the decision loop treated any empty path as a failure — causing agents to mark their own position as unreachable. Fixed with an explicit "already there" check.
+
+Full writeup of all 10 fixes — symptom, root cause, and resolution — is in the [project report](https://drive.google.com/file/d/16XC8qPywEdDmZpRGQBNo1GQBWOkSqeov/view?usp=sharing).
 
 ---
 
@@ -166,11 +204,15 @@ Replan → if any cell on planned path is now fire/obstacle, recalculate
 2. `PERSON` on current floor (safe but unrescued)
 3. Staircase toward best floor (most danger civilians)
 
+### Multi-agent coordination
+At the start of each tick, every agent claims its chosen target (adding it to a per-floor claimed set) before other agents on the same floor process their decision. This prevents multiple firefighters from converging on the same civilian while ignoring others — a lightweight allocation mechanism rather than explicit inter-agent communication.
+
 ### Water + fire-walking
-- `water > 0` → fire cells treated as passable (cost 3 in Dijkstra / D* Lite)
+- `water > 0` → fire cells treated as passable (cost 3 in Dijkstra / D\* Lite)
 - `water == 0` → fire cells blocked, standard safe routing
 - Standing on or adjacent to fire drains 2 water/step
 - Hospital delivery refills +20 water (capped at 100)
+- When water transitions from available to exhausted mid-route, the active D\* Lite instance is discarded and rebuilt under the new traversal policy, rather than patching the flag alone — see [Engineering Process](#engineering-process-validation--debugging)
 
 ### Ambulance routing
 - A\* runs from the burning building's road entrance to each of the 3 hospitals
@@ -183,13 +225,20 @@ Replan → if any cell on planned path is now fire/obstacle, recalculate
 
 ## Scoring
 
-| Component | Points |
-|-----------|--------|
-| Base (rescued / total × 1000) | 0 – 1000 |
-| Speed bonus (efficiency × 500) | 0 – 500 |
-| Fire control bonus | 0 – 300 |
-| Danger avoidance bonus | 100 |
-| **Maximum** | **2000** |
+> ⚠️ **Verify against `metrics.py` before relying on this table** — this reflects the formula documented in the project report; confirm it matches the current implementation.
+
+The simulation evaluates performance through a composite score bounded between 0 and 2000 points, computed from six components at the end of each run:
+
+| Component | Range | Formula |
+|---|---|---|
+| Base (rescue ratio) | 0 – 900 | `min(1, rescued/total)² × 900` |
+| Zero-burn bonus | 0 – 150 | `max(0, 1 − burn_ratio/0.25) × 150` |
+| Speed bonus | 0 – 350 | `max(0, (1 − steps/max_steps)^0.7) × 350` |
+| Fire control bonus | 0 – 250 | `max(0, 1 − avg_fire/120) × 250` |
+| Extinguish bonus | 0 – 150 | `min(150, fires_extinguished × 5)` |
+| Casualty penalty | subtracted | `burn_ratio² × 250 + burn_ratio × 100` |
+
+The base component is **quadratic**, penalising partial rescues more steeply than a linear scale would. The zero-burn bonus is a cliff reward — it only reaches its maximum when no civilians are lost. The fire control bonus uses *average* fire cell count over the full run rather than peak fire, since peak fire is highly seed-dependent while the average better reflects sustained containment quality.
 
 ---
 
@@ -198,9 +247,11 @@ Replan → if any cell on planned path is now fire/obstacle, recalculate
 | Algorithm | Used for | Notes |
 |-----------|----------|-------|
 | A\* | Default firefighter pathfinding; ambulance + firetruck routing | Manhattan distance heuristic, optimal on static grids |
-| BFS | Optional via `--algorithm bfs` | Guaranteed shortest path, no heuristic |
-| Dijkstra | Optional via `--algorithm dijkstra` | Weighted edges — treats fire cells as cost 3 when water > 0 |
-| D\* Lite | Optional via `--algorithm dstar_lite` | Incremental replanning — repairs existing path when fire spreads instead of replanning from scratch; best choice for dynamic environments |
+| BFS | Optional via `--algorithm bfs` | Guaranteed shortest hop-count path, no heuristic |
+| Dijkstra | Optional via `--algorithm dijkstra` | Weighted edges — treats fire cells as cost 3 when water > 0, danger cells as cost 2 |
+| D\* Lite | Optional via `--algorithm dstar_lite` | Incremental replanning — repairs the existing search tree when fire spreads instead of replanning from scratch; highest-scoring algorithm in benchmarking (see above) |
+
+All four are implemented from first principles — no pathfinding libraries.
 
 ---
 
